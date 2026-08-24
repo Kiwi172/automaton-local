@@ -21,6 +21,7 @@ const LOCAL_ENV_KEYS = [
   "AUTOMATON_LOCAL_CREDITS_CENTS",
   "AUTOMATON_LOCAL_ALLOW_CLOUD_TOOLS",
   "AUTOMATON_WORKSPACE",
+  "AUTOMATON_LOCAL_INFERENCE_TIMEOUT_MS",
   "OLLAMA_BASE_URL",
 ];
 
@@ -159,6 +160,34 @@ describe("filterToolsForLocalMode", () => {
   it("does not filter tools the local machine can actually run", () => {
     for (const kept of ["exec", "read_file", "git_commit", "update_soul", "remember_fact", "enter_low_compute"]) {
       expect(CLOUD_ONLY_TOOLS).not.toContain(kept);
+    }
+  });
+});
+
+describe("inference timeouts", () => {
+  it("defaults to a budget local hardware can actually meet", async () => {
+    const { resolveLocalModeSettings, DEFAULT_LOCAL_INFERENCE_TIMEOUT_MS } = await import("../../local/mode.js");
+    const settings = resolveLocalModeSettings(null);
+    expect(settings.inferenceTimeoutMs).toBe(DEFAULT_LOCAL_INFERENCE_TIMEOUT_MS);
+    // The shared default is 120s for an agent turn. A 7B model on CPU blew
+    // through that on every turn during testing, so this must be far larger.
+    expect(settings.inferenceTimeoutMs).toBeGreaterThan(120_000);
+  });
+
+  it("can be overridden from the environment", async () => {
+    process.env.AUTOMATON_LOCAL_INFERENCE_TIMEOUT_MS = "300000";
+    const { resolveLocalModeSettings } = await import("../../local/mode.js");
+    expect(resolveLocalModeSettings(null).inferenceTimeoutMs).toBe(300_000);
+    delete process.env.AUTOMATON_LOCAL_INFERENCE_TIMEOUT_MS;
+  });
+
+  it("scales every task budget off the configured one", async () => {
+    const { buildLocalTaskTimeouts } = await import("../../local/routing.js");
+    const timeouts = buildLocalTaskTimeouts(900_000);
+    expect(timeouts.agent_turn).toBe(900_000);
+    expect(timeouts.planning).toBe(900_000);
+    for (const value of Object.values(timeouts)) {
+      expect(value).toBeGreaterThan(120_000);
     }
   });
 });

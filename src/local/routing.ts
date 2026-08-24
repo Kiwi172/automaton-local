@@ -66,3 +66,22 @@ export function buildLocalRoutingMatrix(
   }
   return matrix;
 }
+
+/**
+ * Per-task wall-clock budgets for local inference.
+ *
+ * The shared TASK_TIMEOUTS allow 120s for an agent turn. On a 16-core CPU with
+ * no GPU, a 7B model needs several minutes just to ingest this agent's
+ * ~8,000-token prompt, so every turn is aborted before it produces anything.
+ * These scale off a single configured budget instead.
+ */
+export function buildLocalTaskTimeouts(inferenceTimeoutMs: number): Record<string, number> {
+  return {
+    agent_turn: inferenceTimeoutMs,
+    planning: inferenceTimeoutMs,
+    summarization: Math.round(inferenceTimeoutMs / 2),
+    safety_check: Math.round(inferenceTimeoutMs / 2),
+    // Triage is meant to be cheap; if it is slow, something is wrong anyway.
+    heartbeat_triage: Math.round(inferenceTimeoutMs / 4),
+  };
+}

@@ -30,23 +30,29 @@ export class InferenceRouter {
   private registry: ModelRegistry;
   private budget: InferenceBudgetTracker;
   private routingMatrix: RoutingMatrix;
+  private taskTimeouts: Record<string, number>;
 
   /**
    * @param routingMatrix Overrides the default tier/task model preferences.
    *   Local mode passes a matrix built from the models its own endpoint serves,
    *   since the defaults name cloud models that are seeded into the registry
    *   and would otherwise win selection.
+   * @param taskTimeouts Overrides the per-task wall-clock budgets. The defaults
+   *   assume datacentre GPUs; a 7B model on CPU exceeds the 120s agent_turn
+   *   budget on every single turn, which kills the agent's thinking outright.
    */
   constructor(
     db: Database,
     registry: ModelRegistry,
     budget: InferenceBudgetTracker,
     routingMatrix?: RoutingMatrix,
+    taskTimeouts?: Record<string, number>,
   ) {
     this.db = db;
     this.registry = registry;
     this.budget = budget;
     this.routingMatrix = routingMatrix ?? DEFAULT_ROUTING_MATRIX;
+    this.taskTimeouts = taskTimeouts ?? TASK_TIMEOUTS;
   }
 
   /**
@@ -119,7 +125,7 @@ export class InferenceRouter {
     // 5. Build inference options
     const preference = this.getPreference(tier, taskType);
     const maxTokens = request.maxTokens || preference?.maxTokens || model.maxTokens;
-    const timeout = TASK_TIMEOUTS[taskType] || 120_000;
+    const timeout = this.taskTimeouts[taskType] || 120_000;
 
     const inferenceOptions: any = {
       model: model.modelId,

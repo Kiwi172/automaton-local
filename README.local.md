@@ -100,6 +100,13 @@ behaviour depends on reliable tool calling:
 system prompt gets truncated from the front, and the front is where the
 constitution lives.
 
+**Timeouts are the other thing that will bite you.** Upstream allows 60s per
+HTTP request and 120s per agent turn — numbers that assume a datacentre GPU. On
+CPU, a 7B model blows through both on every single turn, and the agent never
+completes a thought; you get `Inference timeout after 120000ms` forever. Local
+mode raises this to 15 minutes (`AUTOMATON_LOCAL_INFERENCE_TIMEOUT_MS`) and
+disables retries, since a slow local model is not a flaky one.
+
 ---
 
 ## Donations
@@ -206,7 +213,8 @@ annotated list. The ones that matter most:
 | `AUTOMATON_GENESIS_PROMPT` | — | What the agent is for. The one thing only you can write |
 | `AUTOMATON_NAME` | `automaton` | |
 | `AUTOMATON_LOCAL_MODEL` | `qwen2.5:7b` | Any tool-calling Ollama model |
-| `OLLAMA_CONTEXT_LENGTH` | `32768` | |
+| `OLLAMA_CONTEXT_LENGTH` | `32768` | Below ~16k the prompt is truncated |
+| `AUTOMATON_LOCAL_INFERENCE_TIMEOUT_MS` | `900000` | Raise it further on slow hardware |
 | `AUTOMATON_CREATOR_MONERO_ADDRESS` | fork author's | Donation recipient |
 | `AUTOMATON_DONATIONS` | on | `off` disables the whole system |
 

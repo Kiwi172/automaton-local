@@ -354,6 +354,10 @@ async function run(): Promise<void> {
     forceLocalBackend: localMode,
     allowHttpHosts: localHttpHost ? [localHttpHost] : [],
     localApiKey: localSettings?.apiKey,
+    timeoutMs: localSettings?.inferenceTimeoutMs,
+    // A local model that is merely slow is not a flaky one. Retrying a
+    // multi-minute request three times wastes tens of minutes for nothing.
+    maxRetries: localMode ? 0 : undefined,
   });
 
   if (ollamaBaseUrl) {

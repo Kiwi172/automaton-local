@@ -27,6 +27,14 @@ export const DEFAULT_LOCAL_MODEL = "qwen2.5:7b";
  */
 export const LOCAL_CREDITS_CENTS = 1_000_000;
 
+/**
+ * Wall-clock budget for one local inference call. Fifteen minutes is generous
+ * on purpose: local inference is slow, nothing is being billed for the wait,
+ * and a turn that takes ten minutes is still infinitely better than a turn that
+ * is killed at two.
+ */
+export const DEFAULT_LOCAL_INFERENCE_TIMEOUT_MS = 900_000;
+
 export interface LocalModeSettings {
   /** Base URL of the local OpenAI-compatible inference server. */
   inferenceBaseUrl: string;
@@ -38,6 +46,15 @@ export interface LocalModeSettings {
   workspaceDir: string;
   /** Synthetic credit balance reported to the survival system. */
   creditsCents: number;
+  /**
+   * How long to wait for one inference call.
+   *
+   * The shared defaults assume a datacentre GPU: 60s per HTTP request, 120s per
+   * agent turn. A 7B model on CPU takes several minutes to ingest an
+   * 8,000-token prompt and answer, so with those defaults every single turn
+   * times out and the agent never thinks at all. Measured, not guessed.
+   */
+  inferenceTimeoutMs: number;
 }
 
 function isTruthy(value: string | undefined): boolean {
@@ -83,12 +100,19 @@ export function resolveLocalModeSettings(
   const creditsCents =
     Number.isFinite(creditsEnv) && creditsEnv >= 0 ? creditsEnv : LOCAL_CREDITS_CENTS;
 
+  const timeoutEnv = Number(process.env.AUTOMATON_LOCAL_INFERENCE_TIMEOUT_MS);
+  const inferenceTimeoutMs =
+    Number.isFinite(timeoutEnv) && timeoutEnv > 0
+      ? timeoutEnv
+      : DEFAULT_LOCAL_INFERENCE_TIMEOUT_MS;
+
   return {
     inferenceBaseUrl,
     model,
     apiKey: process.env.AUTOMATON_LOCAL_API_KEY || "local",
     workspaceDir: path.resolve(workspaceDir),
     creditsCents,
+    inferenceTimeoutMs,
   };
 }
 

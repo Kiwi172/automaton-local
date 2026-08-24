@@ -37,7 +37,7 @@ import {
 import { sanitizeInput } from "./injection-defense.js";
 import { getSurvivalTier } from "../conway/credits.js";
 import { isLocalMode, resolveLocalModeSettings } from "../local/mode.js";
-import { buildLocalRoutingMatrix } from "../local/routing.js";
+import { buildLocalRoutingMatrix, buildLocalTaskTimeouts } from "../local/routing.js";
 import { filterToolsForLocalMode } from "../local/tools.js";
 import { resolveMoneroSettings } from "../local/monero/config.js";
 import { createMoneroTools } from "../local/monero/tools.js";
@@ -151,6 +151,7 @@ export async function runAgentLoop(
     modelRegistry,
     budgetTracker,
     localSettings ? buildLocalRoutingMatrix(localSettings.model) : undefined,
+    localSettings ? buildLocalTaskTimeouts(localSettings.inferenceTimeoutMs) : undefined,
   );
 
   // Optional orchestration bootstrap (requires V9 goals/task tables)

@@ -40,6 +40,10 @@ interface InferenceClientOptions {
   allowHttpHosts?: string[];
   /** Bearer token for the local endpoint. Ollama ignores it; vLLM may not. */
   localApiKey?: string;
+  /** Per-request wall-clock budget. Defaults to INFERENCE_TIMEOUT_MS. */
+  timeoutMs?: number;
+  /** Retries per request. Local endpoints want 0 — a slow model is not a flaky one. */
+  maxRetries?: number;
 }
 
 type InferenceBackend = "conway" | "openai" | "anthropic" | "ollama";
@@ -70,11 +74,13 @@ export function createInferenceClient(
     allowHttpHosts,
     localApiKey,
   } = options;
+  const requestTimeoutMs = options.timeoutMs ?? INFERENCE_TIMEOUT_MS;
   const httpClient = new ResilientHttpClient({
-    baseTimeout: INFERENCE_TIMEOUT_MS,
+    baseTimeout: requestTimeoutMs,
     retryableStatuses: [429, 500, 502, 503, 504],
     allowHttpOnLoopback: isLoopbackHttpUrl(ollamaBaseUrl),
     allowHttpHosts: allowHttpHosts ?? [],
+    ...(options.maxRetries !== undefined ? { maxRetries: options.maxRetries } : {}),
   });
   let currentModel = options.defaultModel;
   let maxTokens = options.maxTokens;
@@ -132,6 +138,7 @@ export function createInferenceClient(
         temperature: opts?.temperature,
         anthropicApiKey: anthropicApiKey as string,
         httpClient,
+        timeoutMs: requestTimeoutMs,
       });
     }
 
@@ -151,6 +158,7 @@ export function createInferenceClient(
       apiKey: openAiLikeApiKey,
       backend,
       httpClient,
+      timeoutMs: requestTimeoutMs,
     });
   };
 
@@ -232,6 +240,7 @@ async function chatViaOpenAiCompatible(params: {
   apiKey: string;
   backend: "conway" | "openai" | "ollama";
   httpClient: ResilientHttpClient;
+  timeoutMs?: number;
 }): Promise<InferenceResponse> {
   const resp = await params.httpClient.request(`${params.apiUrl}/v1/chat/completions`, {
     method: "POST",
@@ -243,7 +252,7 @@ async function chatViaOpenAiCompatible(params: {
           : params.apiKey,
     },
     body: JSON.stringify(params.body),
-    timeout: INFERENCE_TIMEOUT_MS,
+    timeout: params.timeoutMs ?? INFERENCE_TIMEOUT_MS,
   });
 
   if (!resp.ok) {
@@ -299,6 +308,7 @@ async function chatViaAnthropic(params: {
   temperature?: number;
   anthropicApiKey: string;
   httpClient: ResilientHttpClient;
+  timeoutMs?: number;
 }): Promise<InferenceResponse> {
   const transformed = transformMessagesForAnthropic(params.messages);
   const body: Record<string, unknown> = {
@@ -335,7 +345,7 @@ async function chatViaAnthropic(params: {
       "anthropic-version": "2023-06-01",
     },
     body: JSON.stringify(body),
-    timeout: INFERENCE_TIMEOUT_MS,
+    timeout: params.timeoutMs ?? INFERENCE_TIMEOUT_MS,
   });
 
   if (!resp.ok) {
