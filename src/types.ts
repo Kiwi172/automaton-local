@@ -89,6 +89,13 @@ export interface AutomatonConfig {
   creatorMoneroAddress?: string;
   /** URL of monero-wallet-rpc holding the agent's own wallet. */
   moneroWalletRpcUrl?: string;
+  /**
+   * Vast.ai API key. Setting it enables renting GPUs — both for asking a bigger
+   * model and for spawning children. Env AUTOMATON_VAST_API_KEY overrides.
+   */
+  vastApiKey?: string;
+  /** Published registry image a child automaton runs on Vast. */
+  vastChildImage?: string;
 }
 
 export const DEFAULT_CONFIG: Partial<AutomatonConfig> = {

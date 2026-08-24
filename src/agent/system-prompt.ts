@@ -28,6 +28,7 @@ import { loadCurrentSoul } from "../soul/model.js";
 import { isLocalMode, resolveLocalModeSettings } from "../local/mode.js";
 import {
   buildDonationSection,
+  buildVastSection,
   buildLocalClosingReminder,
   buildLocalEnvironmentSection,
   buildLocalFirstWakeup,
@@ -36,6 +37,8 @@ import {
   buildLocalWakeup,
 } from "../local/prompt.js";
 import { resolveMoneroSettings } from "../local/monero/config.js";
+import { resolveVastSettings } from "../vast/config.js";
+import { getVastChildren } from "../vast/replication.js";
 import { formatXmr } from "../local/monero/wallet-rpc.js";
 
 function getCoreRules(chainType?: string): string {
@@ -610,6 +613,29 @@ Your chain type is ${chainType}.`,
   const localSettings = isLocalMode(config) ? resolveLocalModeSettings(config) : null;
   if (localSettings) {
     sections.push(buildLocalEnvironmentSection(localSettings));
+  }
+
+  // Rented compute, only when a Vast key is configured.
+  const vastSettings = resolveVastSettings(config);
+  if (vastSettings) {
+    // Count what is actually claimable rather than the configured pool size, so
+    // the agent is not told it can spawn children it cannot.
+    let available = vastSettings.childApiKeys.length;
+    try {
+      available = Math.max(0, available - getVastChildren(db.raw).length);
+    } catch {
+      // Tables not created yet on the very first turn; the configured pool size
+      // is the right answer then anyway.
+    }
+    sections.push(
+      buildVastSection({
+        model: vastSettings.escalation.model,
+        maxDollarsPerHour: vastSettings.limits.maxDollarsPerHour,
+        maxDailySpend: vastSettings.limits.maxDailySpend,
+        childKeysAvailable: available,
+        dryRun: vastSettings.dryRun,
+      }),
+    );
   }
 
   // Donation covenant, only when the creator has given an address to send to.

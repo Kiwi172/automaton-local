@@ -43,6 +43,10 @@ import { LoopDetector } from "./loop-detector.js";
 import { resolveMoneroSettings } from "../local/monero/config.js";
 import { createMoneroTools } from "../local/monero/tools.js";
 import { initDonationLedger } from "../local/monero/donations.js";
+import { resolveVastSettings } from "../vast/config.js";
+import { createVastTools } from "../vast/tools.js";
+import { initVastLedger } from "../vast/spend.js";
+import { initReplicationTables } from "../vast/replication.js";
 import { getUsdcBalance } from "../conway/x402.js";
 import {
   claimInboxMessages,
@@ -118,9 +122,19 @@ export async function runAgentLoop(
   if (moneroSettings) {
     initDonationLedger(db.raw);
   }
-  const tools = moneroSettings
+  const withMonero = moneroSettings
     ? [...baseTools, ...createMoneroTools(moneroSettings)]
     : baseTools;
+
+  // Vast tools appear only when an API key is configured.
+  const vastSettings = resolveVastSettings(config);
+  if (vastSettings) {
+    initVastLedger(db.raw);
+    initReplicationTables(db.raw);
+  }
+  const tools = vastSettings
+    ? [...withMonero, ...createVastTools(vastSettings)]
+    : withMonero;
   const toolContext: ToolContext = {
     identity,
     config,

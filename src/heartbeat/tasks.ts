@@ -44,6 +44,30 @@ export const COLONY_TASK_INTERVALS_MS = {
 } as const;
 
 export const BUILTIN_TASKS: Record<string, HeartbeatTaskFn> = {
+  /**
+   * Destroy Vast instances that have gone idle.
+   *
+   * Lives in the heartbeat rather than the agent loop because that is the whole
+   * point: Vast bills for as long as an instance exists, and the moment a
+   * forgotten rental is most expensive is while the agent is asleep and not
+   * thinking about it.
+   */
+  reap_vast_instances: async (_ctx: TickContext, taskCtx: HeartbeatLegacyContext) => {
+    const { resolveVastSettings } = await import("../vast/config.js");
+    const settings = resolveVastSettings(taskCtx.config);
+    if (!settings) return { shouldWake: false };
+
+    const { runIdleReaper } = await import("../vast/tools.js");
+    const reaped = await runIdleReaper(taskCtx.db.raw, settings);
+    if (reaped > 0) {
+      return {
+        shouldWake: false,
+        message: `Destroyed ${reaped} idle Vast instance(s); billing for them has stopped.`,
+      };
+    }
+    return { shouldWake: false };
+  },
+
   heartbeat_ping: async (ctx: TickContext, taskCtx: HeartbeatLegacyContext) => {
     // Use ctx.creditBalance instead of calling conway.getCreditsBalance()
     const credits = ctx.creditBalance;

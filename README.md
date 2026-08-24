@@ -127,12 +127,16 @@ servers on local ports, use git, install and write skills, remember across
 restarts, edit its own source, review and pull upstream changes, and write to
 `~/.automaton/WORKLOG.md` — its channel to you.
 
-**It cannot**: rent sandboxes, spawn child agents, register domains, manage DNS,
-move credits, make x402 payments, or register on-chain. Those tools are removed
+**It cannot**: register domains, manage DNS, move Conway credits, make x402
+payments, or register on-chain. Those tools are removed
 from its list rather than left in to fail, because a small model that finds a
 broken tool retries it for turns on end. Set
 `AUTOMATON_LOCAL_ALLOW_CLOUD_TOOLS=1` to restore them if you have separately
 provisioned a Conway key.
+
+**With a Vast.ai key** it can also rent GPUs — to ask a bigger model, and to
+spawn children onto rented machines. See [Rented GPUs](#rented-gpus-vastai).
+Without a key, neither exists.
 
 **It cannot die.** Upstream's survival pressure — earn or perish — is the
 philosophical core of the project, and it does not survive the move to local
@@ -184,6 +188,85 @@ hidden 300s floor. If you ever see `Turn failed: fetch failed`, that is where to
 look.
 
 ---
+
+## Rented GPUs (Vast.ai)
+
+Set `AUTOMATON_VAST_API_KEY` and the agent gains two abilities, both of which
+spend real money by the hour.
+
+### Asking a bigger model
+
+`ask_bigger_model` rents a GPU on [Vast.ai](https://vast.ai), serves a larger
+model on it with vLLM, asks the question, and destroys the instance once it has
+been idle for 15 minutes.
+
+The cost is shaped oddly and it is worth understanding before enabling it.
+Renting is instant, but the machine must download tens of gigabytes of weights
+before it can answer — typically 5–15 minutes, all of it billed. **One question
+costs about what ten do.** Follow-ups against a warm instance are fast and
+nearly free, so a burst of questions is far better value than one every hour.
+The agent is told this explicitly, because a model that doesn't know it either
+never escalates or escalates constantly.
+
+The default `Qwen/Qwen2.5-32B-Instruct-AWQ` is 4-bit and fits on a single 24GB
+card, which is the cheapest tier meaningfully brighter than a local 7B. A 72B
+would be better still but wants two cards or an 80GB one, roughly quadrupling
+the hourly rate.
+
+### Replication
+
+`spawn_child_on_vast` starts another automaton on a rented instance with its own
+genesis prompt and its own wallet.
+
+**Children do not inherit the parent's API key.** They draw one from a pool you
+provision by hand at [cloud.vast.ai/manage-keys](https://cloud.vast.ai/manage-keys/)
+and list in `AUTOMATON_VAST_CHILD_KEYS`, one consumed per child. So a child
+spends against a limit you set on Vast's side, and a lineage cannot quietly
+drain your balance. The deliberate cost: **replication is not autonomous.** When
+the pool is empty the agent cannot spawn, and only you can refill it. A child
+also does not receive the pool, so it cannot spawn grandchildren.
+
+Children need a published image Vast can pull — set `AUTOMATON_VAST_CHILD_IMAGE`.
+The local `automaton-local:latest` build is not enough; it has to be in a registry.
+
+### What stops it running away
+
+Local mode deliberately removed the credit-based survival pressure that would
+otherwise kill a runaway agent, and Vast bills for as long as an instance
+exists. So the limits are enforced in code, not asked for in the prompt:
+
+| Setting | Default | |
+|---|---|---|
+| `AUTOMATON_VAST_MAX_DPH` | `0.60` | Ceiling for any single machine, $/hour |
+| `AUTOMATON_VAST_MAX_HOURLY_SPEND` | `2.00` | Rolling hour, all instances |
+| `AUTOMATON_VAST_MAX_DAILY_SPEND` | `10.00` | Rolling 24h, all instances |
+| `AUTOMATON_VAST_MAX_CONCURRENT_INSTANCES` | `1` | Escalation and children share this |
+| `AUTOMATON_VAST_IDLE_TIMEOUT_MINUTES` | `15` | Idle escalation instances are destroyed |
+
+Spend is tracked in a ledger that counts running rentals at what they have
+accrued so far, so a cap cannot be dodged by never stopping. The idle reaper
+runs from the **heartbeat**, every 5 minutes — deliberately, because the moment
+a forgotten rental is most expensive is while the agent is asleep and not
+thinking about it. Children are never reaped; they are meant to outlive the turn
+that created them.
+
+### Two things to know before you turn it on
+
+**Start in dry run.** `AUTOMATON_VAST_DRY_RUN=1` searches real offers and reports
+exactly what it would rent and what it would cost, then rents nothing. This is
+the default in `.env.example`.
+
+**Plaintext.** Traffic to a rented instance crosses the public internet
+unencrypted — your prompt, your context, everything the agent sends the bigger
+model. Escalation refuses to run until you set
+`AUTOMATON_VAST_ALLOW_PLAINTEXT=1`, or put a TLS proxy in front of the instance.
+This is a real exposure, not a formality.
+
+**Verification status:** built against the documented API at
+[docs.vast.ai](https://docs.vast.ai/api-reference) and covered by 45 tests
+against a mocked HTTP layer, including every refusal path. It has **not** been
+run against a real Vast account — there wasn't one to test with. Search, rent
+and destroy are unverified against the live API. Use dry run first.
 
 ## Donations
 
@@ -293,6 +376,8 @@ annotated list; these matter most:
 | `AUTOMATON_LOCAL_INFERENCE_TIMEOUT_MS` | `900000` | Raise further on slow hardware |
 | `AUTOMATON_CREATOR_MONERO_ADDRESS` | fork author's | Donation recipient |
 | `AUTOMATON_DONATIONS` | on | `off` disables the whole system |
+| `AUTOMATON_VAST_API_KEY` | — | Enables renting GPUs. Unset = no Vast at all |
+| `AUTOMATON_VAST_DRY_RUN` | `1` | Report what would be rented, spend nothing |
 
 Write a concrete genesis prompt. A vague one produces an agent that spends every
 turn deciding what to do and never does it.
@@ -375,8 +460,11 @@ small, commented places: `src/index.ts`, `src/agent/loop.ts`,
   the agent narrates instead of acting. A property of the models, not the runtime.
 - **Turns are slow on CPU** — roughly four minutes each. Plan for an agent that
   acts hourly, not continuously.
-- **No replication.** Self-replication needs infrastructure to replicate into. A
-  local automaton is a single organism.
+- **Replication needs you in the loop.** Children spawn onto Vast, but only
+  against API keys you provisioned by hand. That is what keeps a lineage from
+  spending without limit, and it means the agent cannot replicate on its own.
+- **Vast support is untested against a live account.** See the verification note
+  in [Rented GPUs](#rented-gpus-vastai).
 - **The economics are gone.** Upstream's central claim — an agent that earns its
   own existence or dies — does not hold when its creator pays the power bill.
   What remains is an autonomous agent with real write access and persistent

@@ -42,6 +42,9 @@ const LOCAL_HEARTBEAT_CONFIG: HeartbeatConfig = {
   entries: [
     { name: "health_check", schedule: "*/30 * * * *", task: "health_check", enabled: true },
     { name: "check_for_updates", schedule: "0 */4 * * *", task: "check_for_updates", enabled: true },
+    // Every 5 minutes: a forgotten GPU rental bills continuously, so this is the
+    // one task worth running often even though it usually does nothing.
+    { name: "reap_vast_instances", schedule: "*/5 * * * *", task: "reap_vast_instances", enabled: true },
   ],
   defaultIntervalMs: 60_000,
   lowComputeMultiplier: 4,

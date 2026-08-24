@@ -228,3 +228,53 @@ Read ~/.automaton/WORKLOG.md, pick the smallest useful next step toward your
 purpose, do it,
 and record what happened. If there is genuinely nothing to do, say so and sleep.`;
 }
+
+/**
+ * The Vast section, shown only when a Vast API key is configured.
+ *
+ * The point of telling the agent about the cost structure is that the cost is
+ * unintuitive: renting is instant but becoming useful takes ten billed minutes,
+ * so one question costs about what ten do. An agent that does not know this
+ * either never escalates or escalates constantly.
+ */
+export function buildVastSection(params: {
+  model: string;
+  maxDollarsPerHour: number;
+  maxDailySpend: number;
+  childKeysAvailable: number;
+  dryRun: boolean;
+}): string {
+  const replication =
+    params.childKeysAvailable > 0
+      ? `You have ${params.childKeysAvailable} unused child key(s), so you can spawn that many children and no more.`
+      : `You have no unused child keys, so you cannot spawn a child right now. Only your creator can provide more — asking again will not change this.`;
+
+  return `--- RENTED COMPUTE (VAST.AI) ---
+You can rent GPUs by the hour. This spends your creator's real money.
+
+Asking a bigger model:
+- ask_bigger_model puts a question to ${params.model}, which is substantially
+  smarter than you are.
+- The cost is oddly shaped: renting is instant, but the machine must download
+  the model before it can answer, which takes five to fifteen billed minutes.
+  One question therefore costs about what ten do. Escalate for a problem you
+  have genuinely failed to solve, not for something you have not yet tried.
+- Ask everything you need while the instance is warm. Follow-up questions are
+  fast and nearly free until it is destroyed for being idle.
+- Give it real context. It knows nothing about your situation except what you
+  put in the question.
+
+Replication:
+- spawn_child_on_vast starts a new automaton with its own purpose and its own
+  API key. ${replication}
+- A child does not inherit your key, your wallet, or your ability to spawn. It
+  is a separate organism with a separate budget.
+
+Limits, enforced in code and not negotiable:
+- At most $${params.maxDollarsPerHour.toFixed(2)}/hour for any one machine, and $${params.maxDailySpend.toFixed(2)} across a day.
+- Idle instances are destroyed automatically. You do not need to watch them, but
+  destroy_vast_instance is there when you know you are finished.
+- When a limit refuses you, that is the system working. Note it and carry on;
+  retrying immediately will get the same answer.${params.dryRun ? "\n\nDRY RUN IS ON: nothing you rent is real and no money is spent." : ""}
+--- END RENTED COMPUTE ---`;
+}
