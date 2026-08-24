@@ -76,11 +76,22 @@ directly, because an agent that believes it is starving behaves like one.
 The agent's system prompt is about 8,000 tokens before the conversation starts.
 Every turn pays to ingest it.
 
-On a 16-core CPU with no GPU, `qwen2.5:7b` prompt-processes at roughly 200
-tokens/sec, so a turn takes on the order of a minute. That is usable for an
-agent that acts a few times an hour. It is not usable for anything interactive.
-Ollama caches the shared prompt prefix between turns, so repeat turns are
-faster than the first.
+Measured on a 16-core CPU with no GPU, running the default `qwen2.5:7b`:
+
+| | |
+|---|---|
+| Prompt processing | ~40 tokens/sec |
+| System prompt | ~8,000 tokens |
+| One complete turn (think + one tool call) | ~4 minutes |
+
+That is usable for an agent that acts a few times an hour. It is not usable for
+anything interactive. Ollama caches the shared prompt prefix between turns, so
+later turns reuse part of that work rather than paying the full 8,000 tokens
+each time.
+
+A 1.5B model on the same box runs about 5x faster (~200 tokens/sec, ~1 minute
+per turn), but it mostly narrates instead of calling tools, which makes it
+useless for real work and useful only for checking that the plumbing runs.
 
 With an NVIDIA GPU, uncomment `gpus: all` in `compose.yaml` and install the
 NVIDIA Container Toolkit on the host. Expect a 10–50x speedup.
@@ -309,5 +320,9 @@ readable.
   What remains is an autonomous agent with real write access and persistent
   memory, which is still an interesting thing to run, but it is not the same
   thing.
-- **Upstream's test suite has at least one hanging test** unrelated to these
-  changes; the local-mode suite runs clean in about seven seconds.
+- **`src/__tests__/context-hardening.test.ts` hangs**, taking `npm test` with
+  it. This is not caused by the local-mode changes — it hangs identically on
+  pristine upstream at `871c53e`, verified in a clean worktree. Run the rest
+  with an explicit file list until upstream fixes it. Everything else passes:
+  346 upstream tests across the security, loop, policy, soul and injection
+  suites, plus 186 local-mode tests.
