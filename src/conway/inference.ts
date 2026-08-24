@@ -14,6 +14,7 @@ import type {
   TokenUsage,
   InferenceToolDefinition,
 } from "../types.js";
+import { Agent } from "undici";
 import { ResilientHttpClient } from "./http-client.js";
 
 const INFERENCE_TIMEOUT_MS = 60_000;
@@ -75,13 +76,30 @@ export function createInferenceClient(
     localApiKey,
   } = options;
   const requestTimeoutMs = options.timeoutMs ?? INFERENCE_TIMEOUT_MS;
-  const httpClient = new ResilientHttpClient({
-    baseTimeout: requestTimeoutMs,
-    retryableStatuses: [429, 500, 502, 503, 504],
-    allowHttpOnLoopback: isLoopbackHttpUrl(ollamaBaseUrl),
-    allowHttpHosts: allowHttpHosts ?? [],
-    ...(options.maxRetries !== undefined ? { maxRetries: options.maxRetries } : {}),
-  });
+
+  // undici's own 300s headersTimeout sits underneath global fetch and ignores
+  // every timeout the caller sets. With stream:false no headers arrive until
+  // the model has finished, so a slow local model dies at five minutes with
+  // "fetch failed". Raising the request budget above the default therefore
+  // means replacing the dispatcher too.
+  const dispatcher =
+    requestTimeoutMs > INFERENCE_TIMEOUT_MS
+      ? new Agent({
+          headersTimeout: requestTimeoutMs,
+          bodyTimeout: requestTimeoutMs,
+        })
+      : undefined;
+
+  const httpClient = new ResilientHttpClient(
+    {
+      baseTimeout: requestTimeoutMs,
+      retryableStatuses: [429, 500, 502, 503, 504],
+      allowHttpOnLoopback: isLoopbackHttpUrl(ollamaBaseUrl),
+      allowHttpHosts: allowHttpHosts ?? [],
+      ...(options.maxRetries !== undefined ? { maxRetries: options.maxRetries } : {}),
+    },
+    dispatcher,
+  );
   let currentModel = options.defaultModel;
   let maxTokens = options.maxTokens;
 

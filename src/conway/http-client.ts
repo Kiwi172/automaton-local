@@ -61,9 +61,20 @@ export class ResilientHttpClient {
   private consecutiveFailures = 0;
   private circuitOpenUntil = 0;
   private readonly config: HttpClientConfig;
+  private readonly dispatcher?: unknown;
 
-  constructor(config?: Partial<HttpClientConfig>) {
+  /**
+   * @param dispatcher Optional undici Dispatcher passed through to fetch.
+   *
+   * Needed because undici — which backs Node's global fetch — enforces its own
+   * 300s headersTimeout that no AbortController setting can raise. With
+   * stream:false the server sends no headers until the whole response is ready,
+   * so a local model that thinks for more than five minutes fails with an
+   * opaque "fetch failed" no matter what timeout the caller asked for.
+   */
+  constructor(config?: Partial<HttpClientConfig>, dispatcher?: unknown) {
     this.config = { ...DEFAULT_HTTP_CLIENT_CONFIG, ...config };
+    this.dispatcher = dispatcher;
   }
 
   async request(
@@ -98,7 +109,8 @@ export class ResilientHttpClient {
               ? { "Idempotency-Key": opts.idempotencyKey }
               : {}),
           },
-        });
+          ...(this.dispatcher ? { dispatcher: this.dispatcher } : {}),
+        } as RequestInit);
         clearTimeout(timer);
 
         // Count retryable HTTP errors toward circuit breaker, regardless of

@@ -118,6 +118,14 @@ completes a thought; you get `Inference timeout after 120000ms` forever. Local
 mode raises this to 15 minutes (`AUTOMATON_LOCAL_INFERENCE_TIMEOUT_MS`) and
 disables retries, since a slow local model is not a flaky one.
 
+There is a second timeout underneath that one. undici, which backs Node's global
+`fetch`, enforces its own 300s `headersTimeout` that no caller setting can
+raise, and because requests are made with `stream: false` the server sends no
+headers until the model has finished. The symptom is a turn dying at exactly
+five minutes with a bare `Turn failed: fetch failed`. Local mode installs an
+undici dispatcher with matching timeouts to lift it. If you ever see that error
+again, this is where to look.
+
 ---
 
 ## Donations
