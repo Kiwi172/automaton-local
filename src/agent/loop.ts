@@ -39,6 +39,7 @@ import { getSurvivalTier } from "../conway/credits.js";
 import { isLocalMode, resolveLocalModeSettings } from "../local/mode.js";
 import { buildLocalRoutingMatrix, buildLocalTaskTimeouts } from "../local/routing.js";
 import { filterToolsForLocalMode } from "../local/tools.js";
+import { LoopDetector } from "./loop-detector.js";
 import { resolveMoneroSettings } from "../local/monero/config.js";
 import { createMoneroTools } from "../local/monero/tools.js";
 import { initDonationLedger } from "../local/monero/donations.js";
@@ -369,6 +370,12 @@ export async function runAgentLoop(
 
   let consecutiveErrors = 0;
   let running = true;
+  // Argument-aware loop detection, complementing the turn-pattern tracking
+  // below. That tracking keys on the sorted set of tool *names* and needs three
+  // identical patterns in a row, so an agent rewriting the same file with a
+  // varying number of calls per turn — observed as write_file×2, ×1, ×1, ×2 —
+  // never trips it. This hashes the arguments too.
+  const loopDetector = new LoopDetector({ escapeHatchTool: "sleep" });
   let lastToolPatterns: string[] = [];
   let loopWarningPattern: string | null = null;
   let idleToolTurns = 0;
@@ -693,6 +700,28 @@ export async function runAgentLoop(
 
           log(config, `[TOOL] ${tc.function.name}(${JSON.stringify(args).slice(0, 100)})`);
 
+          // Refuse a call the agent has already made identically, and hand the
+          // reason back as the tool result so it sees it this turn rather than
+          // next. Executing it again would only produce the same output that
+          // failed to move it on the previous attempts.
+          const loopCheck = loopDetector.recordToolCall(
+            tc.function.name,
+            JSON.stringify(args),
+          );
+          if (loopCheck.blocked) {
+            log(config, `[LOOP] Blocked repeated call: ${tc.function.name}`);
+            turn.toolCalls.push({
+              id: tc.id,
+              name: tc.function.name,
+              arguments: args,
+              result: "",
+              durationMs: 0,
+              error: loopCheck.reason,
+            });
+            callCount++;
+            continue;
+          }
+
           const result = await executeTool(
             tc.function.name,
             args,
@@ -847,6 +876,15 @@ export async function runAgentLoop(
         } else {
           idleToolTurns = 0;
         }
+      }
+
+      // Turn-level signals from the argument-aware detector. Only surfaced when
+      // the existing pattern tracking has not already queued something, so the
+      // agent gets one clear instruction rather than two competing ones.
+      const turnCheck = loopDetector.endTurn();
+      if (turnCheck.reason && !pendingInput) {
+        log(config, `[LOOP] ${turnCheck.blocked ? "Enforcement" : "Warning"}: ${turnCheck.reason.slice(0, 120)}`);
+        pendingInput = { content: turnCheck.reason, source: "system" };
       }
 
       // Log the turn

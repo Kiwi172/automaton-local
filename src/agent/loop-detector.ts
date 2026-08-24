@@ -4,6 +4,16 @@ export interface LoopDetectorConfig {
   maxIdenticalCalls: number;
   maxIdleOnlyTurns: number;
   windowSize: number;
+  /**
+   * Tool the agent should reach for when it cannot make progress.
+   *
+   * Harness agents have a task-completion tool; the main automaton loop does
+   * not — it has `sleep`. Naming a tool the agent does not have is the same
+   * mistake as telling it to delegate to child agents that do not exist: it
+   * reads the instruction, cannot follow it, and repeats the loop it was
+   * warned about.
+   */
+  escapeHatchTool: string;
 }
 
 export interface LoopCheckResult {
@@ -25,6 +35,7 @@ export class LoopDetector {
       maxIdenticalCalls: config?.maxIdenticalCalls ?? 3,
       maxIdleOnlyTurns: config?.maxIdleOnlyTurns ?? 3,
       windowSize: config?.windowSize ?? 10,
+      escapeHatchTool: config?.escapeHatchTool ?? "task_done",
     };
   }
 
@@ -54,7 +65,7 @@ export class LoopDetector {
           reason:
             `You have called "${name}" with identical arguments ${threshold} times in a row. ` +
             "This is a loop. You MUST try a different approach, use a different tool, " +
-            "or call task_done to report that you cannot complete this task.",
+            `or call ${this.config.escapeHatchTool} to report that you cannot complete this task.`,
         };
       }
     }
@@ -82,7 +93,7 @@ export class LoopDetector {
             blocked: true,
             reason:
               `LOOP ENFORCEMENT: You were warned about repeating the tool pattern "${pattern}" ` +
-              "but continued. You MUST take a completely different approach or call task_done " +
+              `but continued. You MUST take a completely different approach or call ${this.config.escapeHatchTool} ` +
               `to report failure. Do NOT call any of these tools: ${pattern}.`,
           };
         }
@@ -95,7 +106,7 @@ export class LoopDetector {
           reason:
             `WARNING: You have repeated the tool pattern "${pattern}" for 3 consecutive turns. ` +
             "This looks like a loop. On your next turn, you MUST try a different approach. " +
-            "If you cannot make progress, call task_done with a failure summary.",
+            `If you cannot make progress, call ${this.config.escapeHatchTool} with a failure summary.`,
         };
       }
     }
@@ -120,7 +131,7 @@ export class LoopDetector {
         reason:
           `IDLE LOOP DETECTED: Your last ${this.config.maxIdleOnlyTurns} turns only used ` +
           "status-check tools. You already know your status. You MUST now execute a CONCRETE " +
-          "action: write code, create a file, run a command, or call task_done if the task is complete.",
+          `action: write code, create a file, run a command, or call ${this.config.escapeHatchTool} if the task is complete.`,
       };
     }
 

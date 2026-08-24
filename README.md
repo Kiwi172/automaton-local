@@ -105,6 +105,16 @@ diff, with tests:
   undefined (reading 'includes')` — useless, so it retried identically. Required
   arguments are now validated against each tool's own schema, and the error names
   the missing parameter.
+- **A finished agent looped forever.** After completing its task, `qwen2.5:7b`
+  rewrote the same file for six more turns, its own worklog reading "no further
+  actions required" the whole time. The loop's existing detection keys on the
+  sorted set of tool *names* and needs three identical patterns in a row, so the
+  real sequence — `write_file` x2, x1, x1, x2 — broke the streak every turn.
+  Upstream has a `LoopDetector` that hashes arguments, but it was only wired
+  into the harness path. It is now wired into the main loop too. This matters
+  more here than upstream: on Conway a looping agent burns credits and the
+  survival system eventually stops it, but local mode deliberately removes that
+  backstop, so nothing else would have.
 - **Upstream's `package-lock.json` is stale** (`automaton@0.1.0` against
   `package.json`'s `0.2.1`), so `npm ci` cannot install. Regenerated.
 
