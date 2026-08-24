@@ -1,0 +1,56 @@
+# One container. Everything inside it.
+#
+#   cp .env.example .env    # edit it, at minimum set AUTOMATON_GENESIS_PROMPT
+#   docker compose up -d --build
+#   docker compose logs -f
+#
+# First boot downloads the model (several GB) before the agent's first thought.
+
+name: automaton-local
+
+services:
+  automaton:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: automaton-local:latest
+    env_file:
+      - .env
+    environment:
+      AUTOMATON_LOCAL_MODE: "1"
+      AUTOMATON_ROLE: all
+    volumes:
+      # Identity, database, SOUL.md, WORKLOG.md, skills. Losing this volume
+      # means losing the agent — its memory, its wallet, everything it wrote.
+      - automaton-state:/root/.automaton
+      # Model weights. Kept apart so rebuilding the agent does not re-download.
+      - ollama-models:/root/.ollama
+      # Monero wallet keys. Back this up if the agent ever holds real funds.
+      - monero-wallet:/root/.monero-wallets
+
+    restart: unless-stopped
+    stop_grace_period: 30s
+
+    # Nothing is published. The inference server and wallet RPC listen on
+    # loopback inside the container and must stay there — the wallet RPC runs
+    # with authentication disabled. If the agent starts a web service you want
+    # to reach, publish that specific port here and nothing else.
+    # ports:
+    #   - "127.0.0.1:8080:8080"
+
+    # Leave the host enough headroom to stay usable while the model runs.
+    # Tune to your machine; a 7B model at Q4 wants ~6GB and likes many cores.
+    deploy:
+      resources:
+        limits:
+          cpus: "12"
+          memory: 16G
+
+    # NVIDIA GPU: uncomment, and install the NVIDIA Container Toolkit on the
+    # host first. Without a GPU this runs on CPU — slower, but it runs.
+    # gpus: all
+
+volumes:
+  automaton-state:
+  ollama-models:
+  monero-wallet:

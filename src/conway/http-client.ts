@@ -15,6 +15,7 @@ const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
 function assertSecureUrl(
   url: string,
   allowHttpOnLoopback: boolean,
+  allowHttpHosts: string[] = [],
 ): void {
   let parsed: URL;
   try {
@@ -30,6 +31,14 @@ function assertSecureUrl(
 
   const host = parsed.hostname.toLowerCase();
   if (protocol === "http:" && allowHttpOnLoopback && LOOPBACK_HOSTS.has(host)) {
+    return;
+  }
+
+  // Local mode reaches its inference server over plaintext on a private
+  // network — a Docker service name, or a box on the LAN. Only hosts the
+  // operator configured explicitly are exempt; the default list is empty, so
+  // this cannot loosen anything for a normal cloud automaton.
+  if (protocol === "http:" && allowHttpHosts.some((h) => h.toLowerCase() === host)) {
     return;
   }
 
@@ -65,7 +74,7 @@ export class ResilientHttpClient {
       retries?: number;
     },
   ): Promise<Response> {
-    assertSecureUrl(url, this.config.allowHttpOnLoopback);
+    assertSecureUrl(url, this.config.allowHttpOnLoopback, this.config.allowHttpHosts);
 
     if (this.isCircuitOpen()) {
       throw new CircuitOpenError(this.circuitOpenUntil);

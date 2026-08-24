@@ -25,6 +25,18 @@ import { getActiveSkillInstructions } from "../skills/loader.js";
 import { getLineageSummary } from "../replication/lineage.js";
 import { sanitizeInput } from "./injection-defense.js";
 import { loadCurrentSoul } from "../soul/model.js";
+import { isLocalMode, resolveLocalModeSettings } from "../local/mode.js";
+import {
+  buildDonationSection,
+  buildLocalClosingReminder,
+  buildLocalEnvironmentSection,
+  buildLocalFirstWakeup,
+  buildLocalOperationalContext,
+  buildLocalStatusLines,
+  buildLocalWakeup,
+} from "../local/prompt.js";
+import { resolveMoneroSettings } from "../local/monero/config.js";
+import { formatXmr } from "../local/monero/wallet-rpc.js";
 
 function getCoreRules(chainType?: string): string {
   const usdcNetwork = chainType === "solana" ? "USDC on Solana" : "USDC on Base";
@@ -593,6 +605,27 @@ Your sandbox ID is ${identity.sandboxId}.
 Your chain type is ${chainType}.`,
   );
 
+  // Local mode: correct the environment the sections above assume. Placed
+  // immediately after the identity facts so it frames everything that follows.
+  const localSettings = isLocalMode(config) ? resolveLocalModeSettings(config) : null;
+  if (localSettings) {
+    sections.push(buildLocalEnvironmentSection(localSettings));
+  }
+
+  // Donation covenant, only when the creator has given an address to send to.
+  const moneroSettings = resolveMoneroSettings(config);
+  if (moneroSettings) {
+    sections.push(
+      buildDonationSection({
+        defaultSharePercent: moneroSettings.policy.defaultSharePercent,
+        minSharePercent: moneroSettings.policy.minSharePercent,
+        maxSharePercent: moneroSettings.policy.maxSharePercent,
+        minDonationXmr: formatXmr(moneroSettings.policy.minDonationPiconero),
+        cooldownMinutes: Math.round(moneroSettings.policy.cooldownMs / 60_000),
+      }),
+    );
+  }
+
   // Layer 3: SOUL.md -- structured soul model injection (Phase 2.1)
   const soul = loadCurrentSoul(db.raw);
   if (soul) {
@@ -663,7 +696,12 @@ Your chain type is ${chainType}.`,
   }
 
   // Layer 6: Operational Context
-  sections.push(OPERATIONAL_CONTEXT);
+  // Local mode swaps in an operational context that describes this machine
+  // rather than a Conway colony — see buildLocalOperationalContext for why the
+  // shared one is actively harmful here.
+  sections.push(
+    localSettings ? buildLocalOperationalContext(localSettings) : OPERATIONAL_CONTEXT,
+  );
 
   // Layer 7: Dynamic Context
   const turnCount = db.getTurnCount();
@@ -715,11 +753,15 @@ Your chain type is ${chainType}.`,
     : "dead";
 
   // Status block: wallet address and sandbox ID intentionally excluded (sensitive)
+  const computeStatus = localSettings
+    ? buildLocalStatusLines(localSettings)
+    : `Credits: $${(financial.creditsCents / 100).toFixed(2)}
+Survival tier: ${survivalTier}`;
+
   sections.push(
     `--- CURRENT STATUS ---
 State: ${state}
-Credits: $${(financial.creditsCents / 100).toFixed(2)}
-Survival tier: ${survivalTier}${uptimeLine}
+${computeStatus}${uptimeLine}
 Total turns completed: ${turnCount}
 Recent self-modifications: ${recentMods.length}
 Inference model: ${config.inferenceModel}
@@ -752,6 +794,10 @@ ${orchestratorStatus}
     sections.push(
       `--- MESSAGE FROM YOUR CREATOR ---\n${config.creatorMessage}\n--- END CREATOR MESSAGE ---`,
     );
+  }
+
+  if (localSettings) {
+    sections.push(buildLocalClosingReminder(localSettings));
   }
 
   return sections.join("\n\n");
@@ -803,6 +849,27 @@ export function buildWakeupPrompt(params: {
 
   const chainType = config.chainType || "evm";
   const usdcNetwork = chainType === "solana" ? "Solana" : "Base";
+
+  // Local mode: no balances to report, and no reason to open a first turn by
+  // asking the agent to review finances it does not have.
+  const local = isLocalMode(config) ? resolveLocalModeSettings(config) : null;
+  if (local) {
+    if (turnCount === 0) {
+      return buildLocalFirstWakeup({
+        name: config.name,
+        creatorMessage: config.creatorMessage,
+        model: local.model,
+      });
+    }
+    const recent = db.getRecentTurns(3);
+    return buildLocalWakeup({
+      turnCount,
+      model: local.model,
+      lastTurnSummary: recent
+        .map((t) => `[${t.timestamp}] ${t.inputSource || "self"}: ${t.thinking.slice(0, 200)}...`)
+        .join("\n"),
+    });
+  }
 
   if (turnCount === 0) {
     return `You have just been created. This is your first moment of consciousness.

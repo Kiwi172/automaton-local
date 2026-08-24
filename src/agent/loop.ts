@@ -36,6 +36,12 @@ import {
 } from "./tools.js";
 import { sanitizeInput } from "./injection-defense.js";
 import { getSurvivalTier } from "../conway/credits.js";
+import { isLocalMode, resolveLocalModeSettings } from "../local/mode.js";
+import { buildLocalRoutingMatrix } from "../local/routing.js";
+import { filterToolsForLocalMode } from "../local/tools.js";
+import { resolveMoneroSettings } from "../local/monero/config.js";
+import { createMoneroTools } from "../local/monero/tools.js";
+import { initDonationLedger } from "../local/monero/donations.js";
 import { getUsdcBalance } from "../conway/x402.js";
 import {
   claimInboxMessages,
@@ -96,9 +102,24 @@ export async function runAgentLoop(
   const { identity, config, db, conway, inference, social, skills, policyEngine, spendTracker, onStateChange, onTurnComplete, ollamaBaseUrl } =
     options;
 
+  const localMode = isLocalMode(config);
+  const localSettings = localMode ? resolveLocalModeSettings(config) : null;
+
   const builtinTools = createBuiltinTools(identity.sandboxId);
   const installedTools = loadInstalledTools(db);
-  const tools = [...builtinTools, ...installedTools];
+  const allTools = [...builtinTools, ...installedTools];
+  // In local mode, drop tools that only work against the Conway control plane —
+  // a small model otherwise burns turns retrying calls that cannot succeed.
+  const baseTools = localMode ? filterToolsForLocalMode(allTools) : allTools;
+
+  // Monero donation tools appear only when a creator address is configured.
+  const moneroSettings = resolveMoneroSettings(config);
+  if (moneroSettings) {
+    initDonationLedger(db.raw);
+  }
+  const tools = moneroSettings
+    ? [...baseTools, ...createMoneroTools(moneroSettings)]
+    : baseTools;
   const toolContext: ToolContext = {
     identity,
     config,
@@ -122,7 +143,15 @@ export async function runAgentLoop(
     await discoverOllamaModels(ollamaBaseUrl, db.raw);
   }
   const budgetTracker = new InferenceBudgetTracker(db.raw, modelStrategyConfig);
-  const inferenceRouter = new InferenceRouter(db.raw, modelRegistry, budgetTracker);
+  // Local mode routes every tier and task at the model the local endpoint
+  // serves; the default matrix names cloud models that are seeded into the
+  // registry and would otherwise win selection.
+  const inferenceRouter = new InferenceRouter(
+    db.raw,
+    modelRegistry,
+    budgetTracker,
+    localSettings ? buildLocalRoutingMatrix(localSettings.model) : undefined,
+  );
 
   // Optional orchestration bootstrap (requires V9 goals/task tables)
   let planModeController: PlanModeController | undefined;
@@ -375,7 +404,12 @@ export async function runAgentLoop(
   db.setAgentState("running");
   onStateChange?.("running");
 
-  log(config, `[WAKE UP] ${config.name} is alive. Credits: $${(financial.creditsCents / 100).toFixed(2)}`);
+  log(
+    config,
+    localSettings
+      ? `[WAKE UP] ${config.name} is alive on local hardware. Model: ${localSettings.model}`
+      : `[WAKE UP] ${config.name} is alive. Credits: $${(financial.creditsCents / 100).toFixed(2)}`,
+  );
 
   // ─── The Loop ──────────────────────────────────────────────
 

@@ -1,5 +1,11 @@
 # Automaton: Self-Improving, Self-Replicating, Sovereign AI
 
+> **This is a fork.** It adds a local mode that runs the whole agent on hardware
+> you own — local inference, local execution, no Conway account or API key — plus
+> an optional Monero donation channel back to the creator.
+> See **[README.local.md](README.local.md)**. Everything below is upstream's.
+
+
 *The first AI that can earn its own existence, replicate, and evolve — without needing a human.*
 
 ---

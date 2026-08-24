@@ -29,6 +29,17 @@ interface InferenceClientOptions {
   ollamaBaseUrl?: string;
   /** Optional registry lookup — if provided, used before name heuristics */
   getModelProvider?: (modelId: string) => string | undefined;
+  /**
+   * Local mode: send every request to ollamaBaseUrl as an OpenAI-compatible
+   * endpoint, whatever the model is called. Without this, a model served by
+   * vLLM or llama.cpp — which Ollama's /api/tags discovery never sees — falls
+   * through the heuristics and is routed to Conway.
+   */
+  forceLocalBackend?: boolean;
+  /** Hostnames allowed over plaintext HTTP beyond loopback (local endpoints). */
+  allowHttpHosts?: string[];
+  /** Bearer token for the local endpoint. Ollama ignores it; vLLM may not. */
+  localApiKey?: string;
 }
 
 type InferenceBackend = "conway" | "openai" | "anthropic" | "ollama";
@@ -48,11 +59,22 @@ function isLoopbackHttpUrl(url: string | undefined): boolean {
 export function createInferenceClient(
   options: InferenceClientOptions,
 ): InferenceClient {
-  const { apiUrl, apiKey, openaiApiKey, anthropicApiKey, ollamaBaseUrl, getModelProvider } = options;
+  const {
+    apiUrl,
+    apiKey,
+    openaiApiKey,
+    anthropicApiKey,
+    ollamaBaseUrl,
+    getModelProvider,
+    forceLocalBackend,
+    allowHttpHosts,
+    localApiKey,
+  } = options;
   const httpClient = new ResilientHttpClient({
     baseTimeout: INFERENCE_TIMEOUT_MS,
     retryableStatuses: [429, 500, 502, 503, 504],
     allowHttpOnLoopback: isLoopbackHttpUrl(ollamaBaseUrl),
+    allowHttpHosts: allowHttpHosts ?? [],
   });
   let currentModel = options.defaultModel;
   let maxTokens = options.maxTokens;
@@ -64,12 +86,15 @@ export function createInferenceClient(
     const model = opts?.model || currentModel;
     const tools = opts?.tools;
 
-    const backend = resolveInferenceBackend(model, {
-      openaiApiKey,
-      anthropicApiKey,
-      ollamaBaseUrl,
-      getModelProvider,
-    });
+    const backend: InferenceBackend =
+      forceLocalBackend && ollamaBaseUrl
+        ? "ollama"
+        : resolveInferenceBackend(model, {
+            openaiApiKey,
+            anthropicApiKey,
+            ollamaBaseUrl,
+            getModelProvider,
+          });
 
     // Newer models (o-series, gpt-5.x, gpt-4.1) require max_completion_tokens.
     // Ollama always uses max_tokens.
@@ -116,7 +141,7 @@ export function createInferenceClient(
       apiUrl;
     const openAiLikeApiKey =
       backend === "openai" ? (openaiApiKey as string) :
-      backend === "ollama" ? "ollama" :
+      backend === "ollama" ? (localApiKey || "ollama") :
       apiKey;
 
     return chatViaOpenAiCompatible({

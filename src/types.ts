@@ -75,6 +75,20 @@ export interface AutomatonConfig {
   rpcUrl?: string;
   /** Chain type for this automaton. Defaults to "evm" if absent. */
   chainType?: ChainType;
+  /**
+   * Run entirely on local hardware: local inference endpoint, local execution,
+   * no Conway control plane. See src/local/mode.ts. Env AUTOMATON_LOCAL_MODE
+   * overrides this field.
+   */
+  localMode?: boolean;
+  /**
+   * Creator's Monero address. Setting it enables the donation tools and fixes
+   * their destination; the agent chooses how much, never who. Empty = the
+   * agent has no way to send Monero to anyone.
+   */
+  creatorMoneroAddress?: string;
+  /** URL of monero-wallet-rpc holding the agent's own wallet. */
+  moneroWalletRpcUrl?: string;
 }
 
 export const DEFAULT_CONFIG: Partial<AutomatonConfig> = {
@@ -608,6 +622,12 @@ export interface HttpClientConfig {
   circuitBreakerThreshold: number;   // default: 5
   circuitBreakerResetMs: number;     // default: 60_000ms
   allowHttpOnLoopback: boolean;      // default: false (for local dev only)
+  /**
+   * Extra hostnames allowed over plaintext HTTP, beyond loopback. Populated
+   * only from an explicitly configured local inference URL (e.g. the "ollama"
+   * service name inside a Docker network, or a LAN box). Default: none.
+   */
+  allowHttpHosts: string[];
 }
 
 export const DEFAULT_HTTP_CLIENT_CONFIG: HttpClientConfig = {
@@ -619,6 +639,7 @@ export const DEFAULT_HTTP_CLIENT_CONFIG: HttpClientConfig = {
   circuitBreakerThreshold: 5,
   circuitBreakerResetMs: 60_000,
   allowHttpOnLoopback: false,
+  allowHttpHosts: [],
 };
 
 // ─── Database ────────────────────────────────────────────────────

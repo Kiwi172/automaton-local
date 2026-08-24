@@ -1,0 +1,75 @@
+# Same image, three containers.
+#
+#   docker compose -f compose.split.yaml up -d --build
+#
+# Worth it when you are iterating on the agent: restarting it here does not
+# unload the model from memory, so a restart is seconds instead of a minute.
+# The single-container compose.yaml is the simpler default.
+
+name: automaton-local-split
+
+services:
+  ollama:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: automaton-local:latest
+    environment:
+      AUTOMATON_ROLE: ollama
+      # Must bind to all interfaces here — the agent reaches it over the
+      # compose network rather than loopback.
+      OLLAMA_HOST: 0.0.0.0:11434
+      OLLAMA_BASE_URL: http://127.0.0.1:11434
+      OLLAMA_CONTEXT_LENGTH: "${OLLAMA_CONTEXT_LENGTH:-32768}"
+      AUTOMATON_LOCAL_MODEL: "${AUTOMATON_LOCAL_MODEL:-qwen2.5:7b}"
+    volumes:
+      - ollama-models:/root/.ollama
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:11434/api/tags"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
+  monero-wallet:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: automaton-local:latest
+    environment:
+      AUTOMATON_ROLE: wallet
+      AUTOMATON_CREATOR_MONERO_ADDRESS: "${AUTOMATON_CREATOR_MONERO_ADDRESS:-}"
+      MONERO_DAEMON_ADDRESS: "${MONERO_DAEMON_ADDRESS:-node.monerodevs.org:18089}"
+      MONERO_NETWORK: "${MONERO_NETWORK:-mainnet}"
+      MONERO_WALLET_RPC_PORT: "18082"
+    # The wallet RPC has authentication disabled, so it must not be reachable
+    # from outside this compose network. Never add a `ports:` entry here.
+    volumes:
+      - monero-wallet:/root/.monero-wallets
+    restart: unless-stopped
+
+  automaton:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: automaton-local:latest
+    env_file:
+      - .env
+    environment:
+      AUTOMATON_LOCAL_MODE: "1"
+      AUTOMATON_ROLE: agent
+      OLLAMA_BASE_URL: http://ollama:11434
+      AUTOMATON_MONERO_WALLET_RPC_URL: http://monero-wallet:18082
+    depends_on:
+      ollama:
+        condition: service_healthy
+    volumes:
+      - automaton-state:/root/.automaton
+    restart: unless-stopped
+    stop_grace_period: 30s
+
+volumes:
+  automaton-state:
+  ollama-models:
+  monero-wallet:

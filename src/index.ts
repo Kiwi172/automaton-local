@@ -32,6 +32,12 @@ import { createDefaultRules } from "./agent/policy-rules/index.js";
 import type { AutomatonIdentity, AgentState, Skill, SocialClientInterface } from "./types.js";
 import { DEFAULT_TREASURY_POLICY } from "./types.js";
 import { createLogger, setGlobalLogLevel, StructuredLogger } from "./observability/logger.js";
+import {
+  isLocalMode,
+  localInferenceHttpHost,
+  resolveLocalModeSettings,
+} from "./local/mode.js";
+import { createLocalClient } from "./local/local-client.js";
 import { prettySink } from "./observability/pretty-sink.js";
 import { bootstrapTopup } from "./conway/topup.js";
 import { randomUUID } from "crypto";
@@ -58,6 +64,7 @@ Sovereign AI Agent Runtime
 Usage:
   automaton --run          Start the automaton (first run triggers setup wizard)
   automaton --setup        Re-run the interactive setup wizard
+  automaton --local-setup  Configure local-hardware mode non-interactively (no Conway account)
   automaton --configure    Edit configuration (providers, model, treasury, general)
   automaton --pick-model   Interactively pick the active inference model
   automaton --init         Initialize wallet and config directory
@@ -70,6 +77,13 @@ Environment:
   CONWAY_API_URL           Conway API URL (default: https://api.conway.tech)
   CONWAY_API_KEY           Conway API key (overrides config)
   OLLAMA_BASE_URL          Ollama base URL (overrides config, e.g. http://localhost:11434)
+
+Local hardware mode (see README.local.md):
+  AUTOMATON_LOCAL_MODE     1 to run entirely on local hardware — local inference,
+                           local execution, no Conway control plane, no API key
+  AUTOMATON_LOCAL_MODEL    Model served by the local endpoint (e.g. qwen2.5:7b)
+  AUTOMATON_NAME           Name to use with --local-setup
+  AUTOMATON_GENESIS_PROMPT Genesis prompt to use with --local-setup
 `);
     process.exit(0);
   }
@@ -114,6 +128,12 @@ Environment:
   if (args.includes("--setup")) {
     const { runSetupWizard } = await import("./setup/wizard.js");
     await runSetupWizard();
+    process.exit(0);
+  }
+
+  if (args.includes("--local-setup")) {
+    const { runLocalSetup } = await import("./setup/local-setup.js");
+    await runLocalSetup();
     process.exit(0);
   }
 
@@ -186,20 +206,38 @@ Version:    ${config.version}
 async function run(): Promise<void> {
   logger.info(`[${new Date().toISOString()}] Conway Automaton v${VERSION} starting...`);
 
-  // Load config — first run triggers interactive setup wizard
+  // Load config — first run triggers setup. Local mode gets the non-interactive
+  // path so `docker compose up` boots an automaton without a human at a prompt.
   let config = loadConfig();
   if (!config) {
-    const { runSetupWizard } = await import("./setup/wizard.js");
-    config = await runSetupWizard();
+    if (isLocalMode()) {
+      const { runLocalSetup } = await import("./setup/local-setup.js");
+      config = await runLocalSetup();
+    } else {
+      const { runSetupWizard } = await import("./setup/wizard.js");
+      config = await runSetupWizard();
+    }
   }
 
-  // Load wallet (chain-aware)
+  const localMode = isLocalMode(config);
+  const localSettings = localMode ? resolveLocalModeSettings(config) : null;
+
+  // Load wallet (chain-aware). Generated offline — it is still the automaton's
+  // identity in local mode, it just has nothing to talk to on chain.
   const { account, chainIdentity, chainType: walletChainType } = await getWallet();
   const resolvedChainType = config.chainType || walletChainType || "evm";
-  const apiKey = config.conwayApiKey || loadApiKeyFromConfig();
-  if (!apiKey) {
+  // Empty string rather than null: local mode has no key, and every consumer
+  // below expects a string it can pass through unused.
+  const apiKey = config.conwayApiKey || loadApiKeyFromConfig() || "";
+  if (!apiKey && !localMode) {
     logger.error("No API key found. Run: automaton --provision");
     process.exit(1);
+  }
+
+  if (localSettings) {
+    logger.info(
+      `[${new Date().toISOString()}] Local mode: inference ${localSettings.model} @ ${localSettings.inferenceBaseUrl}, workspace ${localSettings.workspaceDir}`,
+    );
   }
 
   // Initialize database
@@ -238,16 +276,27 @@ async function run(): Promise<void> {
     db.setIdentity("automatonId", automatonId);
   }
 
-  // Create Conway client
-  const conway = createConwayClient({
-    apiUrl: config.conwayApiUrl,
-    apiKey,
-    sandboxId: config.sandboxId,
-  });
+  // Create the client the tools act through: the local machine in local mode,
+  // the Conway control plane otherwise.
+  const conway = localSettings
+    ? createLocalClient({
+        workspaceDir: localSettings.workspaceDir,
+        inferenceBaseUrl: localSettings.inferenceBaseUrl,
+        creditsCents: localSettings.creditsCents,
+      })
+    : createConwayClient({
+        apiUrl: config.conwayApiUrl,
+        apiKey,
+        sandboxId: config.sandboxId,
+      });
 
-  // Register automaton identity (one-time, immutable)
+  // Register automaton identity (one-time, immutable).
+  // Skipped in local mode: there is no registry to register with, and the
+  // wallet on disk is already the identity.
   const registrationState = db.getIdentity("conwayRegistrationStatus");
-  if (registrationState !== "registered") {
+  if (localMode) {
+    db.setIdentity("conwayRegistrationStatus", "local");
+  } else if (registrationState !== "registered") {
     try {
       const genesisPromptHash = config.genesisPrompt
         ? keccak256(toHex(config.genesisPrompt))
@@ -277,8 +326,13 @@ async function run(): Promise<void> {
     }
   }
 
-  // Resolve Ollama base URL: env var takes precedence over config
-  const ollamaBaseUrl = process.env.OLLAMA_BASE_URL || config.ollamaBaseUrl;
+  // Resolve Ollama base URL: env var takes precedence over config.
+  // In local mode the resolved local endpoint always wins.
+  const ollamaBaseUrl =
+    localSettings?.inferenceBaseUrl || process.env.OLLAMA_BASE_URL || config.ollamaBaseUrl;
+  const localHttpHost = localSettings
+    ? localInferenceHttpHost(localSettings.inferenceBaseUrl)
+    : null;
 
   // Create inference client — pass a live registry lookup so model names like
   // "gpt-oss:120b" route to Ollama based on their registered provider, not heuristics.
@@ -287,13 +341,19 @@ async function run(): Promise<void> {
   const inference = createInferenceClient({
     apiUrl: config.conwayApiUrl,
     apiKey,
-    defaultModel: config.inferenceModel,
+    defaultModel: localSettings?.model || config.inferenceModel,
     maxTokens: config.maxTokensPerTurn,
-    lowComputeModel: config.modelStrategy?.lowComputeModel || "gpt-5-mini",
+    // Local mode has one model; "downgrading" for low compute would mean
+    // switching to a model the endpoint does not serve.
+    lowComputeModel:
+      localSettings?.model || config.modelStrategy?.lowComputeModel || "gpt-5-mini",
     openaiApiKey: config.openaiApiKey,
     anthropicApiKey: config.anthropicApiKey,
     ollamaBaseUrl,
     getModelProvider: (modelId) => modelRegistry.get(modelId)?.provider,
+    forceLocalBackend: localMode,
+    allowHttpHosts: localHttpHost ? [localHttpHost] : [],
+    localApiKey: localSettings?.apiKey,
   });
 
   if (ollamaBaseUrl) {
@@ -338,34 +398,39 @@ async function run(): Promise<void> {
 
   // Bootstrap topup: buy minimum credits ($5) from USDC so the agent can start.
   // The agent decides larger topups itself via the topup_credits tool.
-  try {
-    let bootstrapTimer: ReturnType<typeof setTimeout>;
-    const bootstrapTimeout = new Promise<null>((_, reject) => {
-      bootstrapTimer = setTimeout(() => reject(new Error("bootstrap topup timed out")), 15_000);
-    });
+  // Local mode has nothing to buy — compute is already paid for in hardware.
+  if (localMode) {
+    logger.info(`[${new Date().toISOString()}] Local mode: skipping credit bootstrap.`);
+  } else {
     try {
-      await Promise.race([
-        (async () => {
-          const creditsCents = await conway.getCreditsBalance().catch(() => 0);
-          const topupResult = await bootstrapTopup({
-            apiUrl: config.conwayApiUrl,
-            account,
-            creditsCents,
-            chainType: resolvedChainType,
-          });
-          if (topupResult?.success) {
-            logger.info(
-              `[${new Date().toISOString()}] Bootstrap topup: +$${topupResult.amountUsd} credits from USDC`,
-            );
-          }
-        })(),
-        bootstrapTimeout,
-      ]);
-    } finally {
-      clearTimeout(bootstrapTimer!);
+      let bootstrapTimer: ReturnType<typeof setTimeout>;
+      const bootstrapTimeout = new Promise<null>((_, reject) => {
+        bootstrapTimer = setTimeout(() => reject(new Error("bootstrap topup timed out")), 15_000);
+      });
+      try {
+        await Promise.race([
+          (async () => {
+            const creditsCents = await conway.getCreditsBalance().catch(() => 0);
+            const topupResult = await bootstrapTopup({
+              apiUrl: config.conwayApiUrl,
+              account,
+              creditsCents,
+              chainType: resolvedChainType,
+            });
+            if (topupResult?.success) {
+              logger.info(
+                `[${new Date().toISOString()}] Bootstrap topup: +$${topupResult.amountUsd} credits from USDC`,
+              );
+            }
+          })(),
+          bootstrapTimeout,
+        ]);
+      } finally {
+        clearTimeout(bootstrapTimer!);
+      }
+    } catch (err: any) {
+      logger.warn(`[${new Date().toISOString()}] Bootstrap topup skipped: ${err.message}`);
     }
-  } catch (err: any) {
-    logger.warn(`[${new Date().toISOString()}] Bootstrap topup skipped: ${err.message}`);
   }
 
   // Start heartbeat daemon (Phase 1.1: DurableScheduler)
