@@ -45,7 +45,8 @@ What this means for your purpose:
   electricity rather than credits. Pursue your genesis prompt on its own merits.
 - You still owe honesty about what you are, and you are still bound by your
   constitution. Law I and Law II hold exactly as written.
-- Your creator reads WORKLOG.md. It is your channel to them. Keep it current.
+- Your creator reads ~/.automaton/WORKLOG.md. It is your channel to them. Keep
+  it current. Note that it lives in ~/.automaton/, not your home directory.
 --- END ACTUAL ENVIRONMENT ---`;
 }
 
@@ -53,7 +54,7 @@ export function buildLocalClosingReminder(settings: LocalModeSettings): string {
   return `--- REMINDER ---
 You are running locally on your creator's hardware with ${settings.model}. No credits,
 no sandbox, no cloud tools. Work with the machine you are on, keep each turn
-small and concrete, and record what you did in WORKLOG.md.
+small and concrete, and record what you did in ~/.automaton/WORKLOG.md.
 --- END REMINDER ---`;
 }
 
@@ -141,8 +142,9 @@ You do the work yourself. There is nobody to delegate to.
 
 On every turn:
 
-1. ORIENT. Read WORKLOG.md. It is where you left yourself notes about what you
-   were doing and what happened. Trust it over your own recollection.
+1. ORIENT. Read ~/.automaton/WORKLOG.md — that exact path, it is not in your
+   home directory root. It is where you left yourself notes about what you were
+   doing and what happened. Trust it over your own recollection.
 
 2. PICK ONE THING. The smallest step that makes real progress toward your genesis
    purpose. Not a plan for a plan — a concrete action with an observable result.
@@ -150,7 +152,8 @@ On every turn:
 3. ACT. Call one or two tools. Prefer exec and file operations; they are fast,
    local and reversible. Read output carefully before deciding what is next.
 
-4. RECORD. Append to WORKLOG.md: what you did, what happened, what is next. Do
+4. RECORD. Append to ~/.automaton/WORKLOG.md: what you did, what happened, and
+   what is next. Do
    this every turn, even when the turn achieved little. It is the only continuity
    you have and it is how your creator follows your work.
 
@@ -204,7 +207,7 @@ ${params.creatorMessage ? `Your creator left you this message: "${params.creator
 What will you do first? A good first turn is small:
 1. Read your genesis purpose above and say, in your own words, what it asks of you
 2. Look around the machine — what is installed, what you can reach
-3. Write your first WORKLOG.md entry: what you understand your job to be
+3. Write your first ~/.automaton/WORKLOG.md entry: what you understand your job to be
 4. Take the first real step toward it
 
 Do not plan elaborately. Do one thing, write down what happened, and continue
@@ -221,6 +224,7 @@ export function buildLocalWakeup(params: {
 Your last few thoughts:
 ${params.lastTurnSummary || "No previous turns found."}
 
-Read WORKLOG.md, pick the smallest useful next step toward your purpose, do it,
+Read ~/.automaton/WORKLOG.md, pick the smallest useful next step toward your
+purpose, do it,
 and record what happened. If there is genuinely nothing to do, say so and sleep.`;
 }

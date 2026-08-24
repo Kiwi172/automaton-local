@@ -3339,6 +3339,25 @@ export async function executeTool(
     }
   }
 
+  // Validate required arguments before dispatch.
+  //
+  // Small local models get parameter names wrong regularly — calling exec with
+  // {path, content} instead of {command}, for instance. Without this the tool
+  // body dereferences undefined and the model is handed "Cannot read properties
+  // of undefined (reading 'includes')", which tells it nothing and which it
+  // cannot recover from. Naming the missing parameter lets it retry correctly.
+  const argError = validateRequiredArgs(tool, args);
+  if (argError) {
+    return {
+      id: ulid(),
+      name: toolName,
+      arguments: args,
+      result: "",
+      durationMs: Date.now() - startTime,
+      error: argError,
+    };
+  }
+
   try {
     let result = await tool.execute(args, context);
 
@@ -3413,4 +3432,41 @@ export async function executeTool(
 /** Escape a string for safe shell interpolation. */
 function escapeShellArg(arg: string): string {
   return `'${arg.replace(/'/g, "'\\''")}'`;
+}
+
+/**
+ * Check a tool call against the tool's own JSON schema.
+ *
+ * Only presence of required parameters is checked — enough to turn a crash
+ * inside the tool into a sentence the model can act on, without pulling in a
+ * schema validator or rejecting calls the tool would have handled fine.
+ */
+export function validateRequiredArgs(
+  tool: AutomatonTool,
+  args: Record<string, unknown>,
+): string | null {
+  const schema = tool.parameters as
+    | { required?: unknown; properties?: Record<string, unknown> }
+    | undefined;
+  const required = Array.isArray(schema?.required) ? (schema!.required as string[]) : [];
+  if (required.length === 0) return null;
+
+  const missing = required.filter(
+    (name) => args[name] === undefined || args[name] === null,
+  );
+  if (missing.length === 0) return null;
+
+  const accepted = Object.keys(schema?.properties ?? {});
+  const provided = Object.keys(args);
+  const parts = [
+    `Missing required argument${missing.length > 1 ? "s" : ""} for ${tool.name}: ${missing.join(", ")}.`,
+  ];
+  if (accepted.length > 0) {
+    parts.push(`This tool accepts: ${accepted.join(", ")}.`);
+  }
+  if (provided.length > 0) {
+    parts.push(`You passed: ${provided.join(", ")}.`);
+  }
+  parts.push("Call it again with the correct argument names.");
+  return parts.join(" ");
 }
