@@ -78,7 +78,7 @@ Environment:
   CONWAY_API_KEY           Conway API key (overrides config)
   OLLAMA_BASE_URL          Ollama base URL (overrides config, e.g. http://localhost:11434)
 
-Local hardware mode (see README.local.md):
+Local hardware mode (see README.md):
   AUTOMATON_LOCAL_MODE     1 to run entirely on local hardware — local inference,
                            local execution, no Conway control plane, no API key
   AUTOMATON_LOCAL_MODEL    Model served by the local endpoint (e.g. qwen2.5:7b)

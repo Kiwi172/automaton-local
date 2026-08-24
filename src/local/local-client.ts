@@ -8,8 +8,8 @@
  * an opaque network error.
  *
  * The security boundary in local mode is the container or VM you run this in,
- * not a remote sandbox. Read README.local.md before running it on a host you
- * care about.
+ * not a remote sandbox. Read the Security section of README.md before running
+ * it on a host you care about.
  */
 
 import { spawn } from "child_process";
