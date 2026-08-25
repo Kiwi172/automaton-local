@@ -58,6 +58,29 @@ function plaintextVerdict(settings: VastSettings): string | null {
   );
 }
 
+/**
+ * Turn a search failure into something actionable.
+ *
+ * Vast answers an invalid key with 404 and an auth_error body rather than 401,
+ * so the status code alone does not identify it — the message has to be read.
+ */
+export function describeSearchFailure(err: { message?: string }): string {
+  const message = err?.message ?? String(err);
+  if (/auth_error|invalid user key|unauthor/i.test(message)) {
+    return (
+      "Vast rejected the API key. This is a configuration problem your creator has to fix " +
+      "(AUTOMATON_VAST_API_KEY); nothing you do differently will help. Note it and move on."
+    );
+  }
+  return `Could not reach Vast to search for machines: ${message}`;
+}
+
+/** Search, letting failures propagate so callers can tell them from empty results. */
+async function searchWithFallback(deps: EscalationDeps): Promise<VastOffer[]> {
+  const offer = await findEscalationOffer(deps);
+  return offer ? [offer] : [];
+}
+
 /** Pick the cheapest offer that can actually serve the model. */
 export async function findEscalationOffer(
   deps: EscalationDeps,
@@ -202,17 +225,25 @@ export async function askBigModel(
   let target = await findLiveEndpoint(deps);
 
   if (!target) {
-    const offer = await findEscalationOffer(deps).catch((err) => {
-      logger.warn(`Offer search failed: ${err.message}`);
-      return null;
-    });
+    // A failed search and an empty search are different problems with different
+    // fixes, and conflating them sends the agent tuning GPU filters when the
+    // real fault is a bad API key.
+    let offers: VastOffer[];
+    try {
+      offers = await searchWithFallback(deps);
+    } catch (err: any) {
+      return { status: "refused", reason: describeSearchFailure(err) };
+    }
+
+    const offer = offers[0];
     if (!offer) {
       return {
         status: "refused",
         reason:
-          `No Vast offer matched: ${deps.settings.escalation.gpuNames.join("/")} with ` +
+          `Vast has no machine matching ${deps.settings.escalation.gpuNames.join("/")} with ` +
           `${deps.settings.escalation.minGpuRamMb}MB VRAM under ` +
-          `$${deps.settings.limits.maxDollarsPerHour}/hr. Raise the limit or widen the GPU list.`,
+          `$${deps.settings.limits.maxDollarsPerHour}/hr right now. The search worked; nothing ` +
+          `met the criteria. Raise the price limit or widen the GPU list.`,
       };
     }
 

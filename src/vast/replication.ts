@@ -152,11 +152,20 @@ export async function spawnChildOnVast(
     };
   }
 
-  const offer = await findChildOffer(deps).catch(() => null);
+  let offer;
+  try {
+    offer = await findChildOffer(deps);
+  } catch (err: any) {
+    // Same distinction as escalation: a broken search is not an empty one.
+    const { describeSearchFailure } = await import("./escalation.js");
+    return { status: "refused", reason: describeSearchFailure(err) };
+  }
   if (!offer) {
     return {
       status: "refused",
-      reason: `No Vast offer matched a child's requirements under $${settings.limits.maxDollarsPerHour}/hr.`,
+      reason:
+        `Vast has no machine meeting a child's requirements under ` +
+        `$${settings.limits.maxDollarsPerHour}/hr right now. The search worked; nothing matched.`,
     };
   }
 

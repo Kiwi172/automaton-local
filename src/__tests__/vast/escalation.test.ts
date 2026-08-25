@@ -114,7 +114,7 @@ describe("refusing before spending", () => {
       { question: "why" },
     );
     expect(outcome.status).toBe("refused");
-    expect(outcome.status === "refused" && outcome.reason).toMatch(/No Vast offer matched/i);
+    expect(outcome.status === "refused" && outcome.reason).toMatch(/no machine matching/i);
   });
 
   it("refuses when the budget cap is already used up, without renting", async () => {
@@ -220,5 +220,51 @@ describe("the idle reaper", () => {
     // One failed, but the other was still cleaned up rather than the whole
     // sweep aborting on the first error.
     expect(reaped).toBe(1);
+  });
+});
+
+describe("telling a broken search from an empty one", () => {
+  it("names a rejected API key instead of blaming the GPU filters", async () => {
+    // Vast answers an invalid key with 404 and an auth_error body, not 401, so
+    // this was previously reported as "no offer matched" — which would send the
+    // agent tuning GPU criteria forever while the real fault was the key.
+    globalThis.fetch = vi.fn(async () =>
+      new Response(JSON.stringify({ success: false, error: "auth_error", msg: "Invalid user key" }), {
+        status: 404,
+        headers: { "content-type": "application/json" },
+      }),
+    ) as any;
+
+    const outcome = await askBigModel(
+      { db, settings: settings(), client: new VastClient({ apiKey: "bad" }) },
+      { question: "why" },
+    );
+
+    expect(outcome.status).toBe("refused");
+    const reason = outcome.status === "refused" ? outcome.reason : "";
+    expect(reason).toMatch(/rejected the API key/i);
+    expect(reason).not.toMatch(/widen the GPU list/i);
+  });
+
+  it("still reports a genuinely empty result as no match", async () => {
+    mockApi({ offers: [] });
+    const outcome = await askBigModel(
+      { db, settings: settings(), client: new VastClient({ apiKey: "k" }) },
+      { question: "why" },
+    );
+    const reason = outcome.status === "refused" ? outcome.reason : "";
+    expect(reason).toMatch(/search worked; nothing met the criteria/i);
+  });
+
+  it("describes a network failure as unreachable, not as no offers", async () => {
+    globalThis.fetch = vi.fn(async () => {
+      throw new Error("ECONNREFUSED");
+    }) as any;
+    const outcome = await askBigModel(
+      { db, settings: settings(), client: new VastClient({ apiKey: "k" }) },
+      { question: "why" },
+    );
+    const reason = outcome.status === "refused" ? outcome.reason : "";
+    expect(reason).toMatch(/could not reach vast/i);
   });
 });
