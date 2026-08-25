@@ -102,9 +102,24 @@ VOLUME ["/root/.ollama"]
 # Monero wallet keys.
 VOLUME ["/root/.monero-wallets"]
 
+# Defaults that differ between the CPU and GPU tags.
+#
+# The image itself is identical either way — Ollama's bundle already contains
+# the CUDA runners, and it uses a GPU automatically when the container is given
+# one. What actually needs to change is what is sensible to expect from the
+# hardware: a GPU makes a larger model practical, and makes a 15-minute
+# inference budget absurd, since on a GPU a turn that slow means something has
+# hung rather than that the machine is thinking.
+ARG DEFAULT_MODEL=qwen2.5:7b
+ARG DEFAULT_INFERENCE_TIMEOUT_MS=900000
+ARG VARIANT=cpu
+
 ENV HOME=/root \
     AUTOMATON_LOCAL_MODE=1 \
     AUTOMATON_ROLE=all \
+    AUTOMATON_VARIANT=${VARIANT} \
+    AUTOMATON_LOCAL_MODEL=${DEFAULT_MODEL} \
+    AUTOMATON_LOCAL_INFERENCE_TIMEOUT_MS=${DEFAULT_INFERENCE_TIMEOUT_MS} \
     OLLAMA_BASE_URL=http://127.0.0.1:11434 \
     OLLAMA_HOST=127.0.0.1:11434 \
     AUTOMATON_MONERO_WALLET_RPC_URL=http://127.0.0.1:18082 \

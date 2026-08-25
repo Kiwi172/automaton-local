@@ -31,6 +31,21 @@ trap shutdown SIGTERM SIGINT
 
 # ─── Inference server ─────────────────────────────────────────────
 
+report_hardware() {
+  # Say plainly whether a GPU was found. The failure this prevents is a silent
+  # fallback to CPU on a GPU tag, where the only symptom is turns taking four
+  # minutes instead of ten seconds and no obvious reason why.
+  if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L >/dev/null 2>&1; then
+    log "GPU detected: $(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader | head -1)"
+  elif [ "${AUTOMATON_VARIANT:-cpu}" = "gpu" ]; then
+    log "WARNING: this is the GPU image but no GPU is visible."
+    log "  Ollama will fall back to CPU and ${AUTOMATON_LOCAL_MODEL:-the model} will be very slow."
+    log "  Run with --gpus all, and install the NVIDIA Container Toolkit on the host."
+  else
+    log "No GPU detected; running on CPU."
+  fi
+}
+
 start_ollama() {
   # A long context matters more here than anywhere else: the agent's system
   # prompt alone runs to several thousand tokens, and Ollama's default context
@@ -38,6 +53,7 @@ start_ollama() {
   # the environment description live.
   export OLLAMA_CONTEXT_LENGTH="${OLLAMA_CONTEXT_LENGTH:-32768}"
   export OLLAMA_HOST="${OLLAMA_HOST:-127.0.0.1:11434}"
+  report_hardware
   log "starting ollama on ${OLLAMA_HOST} (context ${OLLAMA_CONTEXT_LENGTH})"
   ollama serve &
   pids+=($!)

@@ -1,0 +1,51 @@
+# GPU variant. Same image contents as compose.yaml — Ollama's bundle already
+# carries the CUDA runners — but with defaults that suit a GPU and the device
+# reservation that actually hands one to the container.
+#
+#   docker compose -f compose.gpu.yaml up -d --build
+#
+# Requires the NVIDIA Container Toolkit on the host:
+#   https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html
+# Without it the container starts, finds no GPU, and falls back to CPU — the
+# entrypoint logs a warning saying exactly that.
+
+name: automaton-local-gpu
+
+services:
+  automaton:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VARIANT: gpu
+        # A GPU makes a 14B practical; on CPU it is unusably slow.
+        DEFAULT_MODEL: "${AUTOMATON_LOCAL_MODEL:-qwen2.5:14b}"
+        # On a GPU, a turn taking minutes means something hung rather than that
+        # the machine is thinking. Fail fast instead of waiting a quarter hour.
+        DEFAULT_INFERENCE_TIMEOUT_MS: "180000"
+    image: automaton-local:gpu
+    env_file:
+      - .env
+    environment:
+      AUTOMATON_LOCAL_MODE: "1"
+      AUTOMATON_ROLE: all
+      OLLAMA_CONTEXT_LENGTH: "${OLLAMA_CONTEXT_LENGTH:-32768}"
+
+    # Hand the container every GPU on the host.
+    gpus: all
+
+    volumes:
+      - automaton-state:/root/.automaton
+      - ollama-models:/root/.ollama
+      - monero-wallet:/root/.monero-wallets
+
+    restart: unless-stopped
+    stop_grace_period: 30s
+
+    # No CPU/memory limit here: the model lives in VRAM, so the host limits that
+    # matter on the CPU variant are not the constraint.
+
+volumes:
+  automaton-state:
+  ollama-models:
+  monero-wallet:

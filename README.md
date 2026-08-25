@@ -163,8 +163,48 @@ Usable for an agent that acts a few times an hour. Not usable for anything
 interactive. Ollama caches the shared prompt prefix between turns, so later turns
 reuse part of that work.
 
-With an NVIDIA GPU, uncomment `gpus: all` in [`compose.yaml`](compose.yaml) and
-install the NVIDIA Container Toolkit on the host. Expect a 10–50x speedup.
+### Running on a GPU
+
+There is a second tag for this, but the difference is not what you might expect.
+**The image contents are identical** — Ollama's bundle already carries CUDA v12
+and v13 runners, and it uses a GPU automatically whenever the container is given
+one. What the GPU tag changes is the defaults, because what is sensible to
+expect from the hardware changes:
+
+| | `:latest` (CPU) | `:gpu` |
+|---|---|---|
+| Model | `qwen2.5:7b` | `qwen2.5:14b` |
+| Inference timeout | 15 minutes | 3 minutes |
+
+A GPU makes a 14B practical where CPU does not. And a 15-minute budget on a GPU
+is worse than useless: a turn that slow means something has hung, and waiting a
+quarter hour to find out hides the problem rather than tolerating it.
+
+```bash
+docker compose -f compose.gpu.yaml up -d --build
+```
+
+This needs the [NVIDIA Container
+Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
+on the host. Without it the container still starts, finds no GPU, and silently
+falls back to CPU — so the entrypoint checks and says so outright:
+
+```
+[entrypoint] WARNING: this is the GPU image but no GPU is visible.
+[entrypoint]   Ollama will fall back to CPU and qwen2.5:14b will be very slow.
+```
+
+Expect roughly a 10–50x speedup over CPU, depending on the card. With 24GB of
+VRAM a 32B model becomes reasonable — set `AUTOMATON_LOCAL_MODEL` accordingly.
+
+Either variant also runs from the published image without building:
+
+```bash
+docker run -d --gpus all \
+  -e AUTOMATON_GENESIS_PROMPT="..." \
+  -v automaton-state:/root/.automaton -v ollama-models:/root/.ollama \
+  kiwi128321908321/automaton-local:gpu
+```
 
 Model choice matters more than anything else, because the agent's behaviour
 depends entirely on reliable tool calling:
