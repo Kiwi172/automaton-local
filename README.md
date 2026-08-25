@@ -226,8 +226,25 @@ drain your balance. The deliberate cost: **replication is not autonomous.** When
 the pool is empty the agent cannot spawn, and only you can refill it. A child
 also does not receive the pool, so it cannot spawn grandchildren.
 
-Children need a published image Vast can pull — set `AUTOMATON_VAST_CHILD_IMAGE`.
-The local `automaton-local:latest` build is not enough; it has to be in a registry.
+Children run from a published image, since Vast pulls rather than builds. One is
+already on Docker Hub and set as the default:
+
+```
+kiwi128321908321/automaton-local:latest
+```
+
+Commit-pinned tags are pushed alongside `latest` (`:61e75b6` and so on), which is
+what you want for a child — a lineage that silently changes behaviour when the
+parent rebuilds is hard to reason about. To publish your own:
+
+```bash
+docker build -t youruser/automaton-local:latest .
+docker push youruser/automaton-local:latest
+```
+
+Note that a child pulls this image (~3GB) *and* its model (~4.7GB) before its
+first thought, all of it billed. Budget roughly ten minutes of rental before a
+child does anything useful.
 
 ### What stops it running away
 
@@ -378,6 +395,7 @@ annotated list; these matter most:
 | `AUTOMATON_DONATIONS` | on | `off` disables the whole system |
 | `AUTOMATON_VAST_API_KEY` | — | Enables renting GPUs. Unset = no Vast at all |
 | `AUTOMATON_VAST_DRY_RUN` | `1` | Report what would be rented, spend nothing |
+| `AUTOMATON_VAST_CHILD_IMAGE` | published image | What a child runs on Vast |
 
 Write a concrete genesis prompt. A vague one produces an agent that spends every
 turn deciding what to do and never does it.
