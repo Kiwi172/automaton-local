@@ -134,6 +134,18 @@ describe("spawning", () => {
     expect(body.image).toBe("registry.example/automaton:latest");
   });
 
+  it("publishes no ports, so the child's Ollama stays off the public internet", async () => {
+    const calls = mockVastApi();
+    const s = settings();
+    await spawnChildOnVast(
+      { db, settings: s, client: new VastClient({ apiKey: s.apiKey }) },
+      { name: "scout", genesisPrompt: "x" },
+    );
+    const body = JSON.parse(calls.find((c) => c.url.includes("/asks/"))!.options.body);
+    const portKeys = Object.keys(body.env).filter((k) => k.startsWith("-p "));
+    expect(portKeys).toEqual([]);
+  });
+
   it("does not give the child the parent's child-key pool", async () => {
     const calls = mockVastApi();
     const s = settings();

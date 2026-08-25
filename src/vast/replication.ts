@@ -173,8 +173,11 @@ export async function spawnChildOnVast(
     AUTOMATON_NAME: params.name,
     AUTOMATON_GENESIS_PROMPT: params.genesisPrompt,
     AUTOMATON_VAST_API_KEY: claimed.key,
-    "-p 11434:11434": "1",
   };
+  // Deliberately no published ports. The child's Ollama listens on loopback
+  // inside its own container and only its own agent talks to it; publishing
+  // 11434 would put an unauthenticated inference endpoint on the public
+  // internet, for no benefit to anyone but whoever found it.
   if (params.creatorAddress) env.AUTOMATON_CREATOR_ADDRESS = params.creatorAddress;
 
   if (deps.client.isDryRun) {
