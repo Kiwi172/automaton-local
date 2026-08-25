@@ -43,6 +43,9 @@ import { LoopDetector } from "./loop-detector.js";
 import { resolveMoneroSettings } from "../local/monero/config.js";
 import { createMoneroTools } from "../local/monero/tools.js";
 import { initDonationLedger } from "../local/monero/donations.js";
+import { createEarningTools } from "../earn/tools.js";
+import { initJobStore } from "../earn/jobs.js";
+import { initSpendingLedger } from "../earn/spending.js";
 import { resolveVastSettings } from "../vast/config.js";
 import { createVastTools } from "../vast/tools.js";
 import { initVastLedger } from "../vast/spend.js";
@@ -122,9 +125,21 @@ export async function runAgentLoop(
   if (moneroSettings) {
     initDonationLedger(db.raw);
   }
-  const withMonero = moneroSettings
+  // Earning needs the wallet, so it rides on the same settings as donations.
+  // Switch it off with AUTOMATON_EARNING=off when the agent should not be
+  // taking work from strangers.
+  const earningEnabled =
+    (process.env.AUTOMATON_EARNING || "on").trim().toLowerCase() !== "off";
+
+  let withMonero = moneroSettings
     ? [...baseTools, ...createMoneroTools(moneroSettings)]
     : baseTools;
+
+  if (moneroSettings && earningEnabled) {
+    initJobStore(db.raw);
+    initSpendingLedger(db.raw);
+    withMonero = [...withMonero, ...createEarningTools(moneroSettings)];
+  }
 
   // Vast tools appear only when an API key is configured.
   const vastSettings = resolveVastSettings(config);

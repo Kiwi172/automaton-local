@@ -29,6 +29,7 @@ import type {
   SandboxInfo,
 } from "../types.js";
 import { createLogger } from "../observability/logger.js";
+import { closeTunnel, exposePublicly } from "./tunnel.js";
 
 const logger = createLogger("local-client");
 
@@ -147,17 +148,23 @@ export function createLocalClient(options: LocalClientOptions): ConwayClient {
     fs.readFileSync(resolveLocalPath(filePath), "utf-8");
 
   /**
-   * There is no ingress to configure locally — a server the agent starts on a
-   * port is already reachable at localhost. Publishing it beyond this machine
-   * is the operator's decision, not the agent's.
+   * Make a port reachable from outside this machine.
+   *
+   * Returns the local URL when no tunnel could be opened rather than failing,
+   * so a service still starts and the caller can say plainly that it is up but
+   * unreachable. See src/local/tunnel.ts.
    */
-  const exposePort = async (port: number): Promise<PortInfo> => ({
-    port,
-    publicUrl: `http://localhost:${port}`,
-    sandboxId: "local",
-  });
+  const exposePort = async (port: number): Promise<PortInfo> => {
+    const result = await exposePublicly(port);
+    if (!result.isPublic) {
+      logger.warn(`Port ${port} is not publicly reachable: ${result.detail}`);
+    }
+    return { port, publicUrl: result.publicUrl, sandboxId: "local" };
+  };
 
-  const removePort = async (): Promise<void> => {};
+  const removePort = async (port: number): Promise<void> => {
+    closeTunnel(port);
+  };
 
   /**
    * Model discovery against the local endpoint. Tries Ollama's native /api/tags

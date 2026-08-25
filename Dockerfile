@@ -79,6 +79,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       git curl ca-certificates python3 make g++ procps \
     && rm -rf /var/lib/apt/lists/*
 
+# cloudflared: gives the agent a real public HTTPS hostname for anything it
+# serves, with no account or DNS setup. Without it, nothing the agent builds can
+# be reached — and it cannot be paid for what nobody can reach.
+ARG CLOUDFLARED_VERSION=2025.8.1
+ADD https://github.com/cloudflare/cloudflared/releases/download/${CLOUDFLARED_VERSION}/cloudflared-linux-amd64 /usr/local/bin/cloudflared
+RUN chmod +x /usr/local/bin/cloudflared
+
 COPY --from=binaries /opt/ollama/bin/ollama /usr/local/bin/ollama
 COPY --from=binaries /opt/ollama/lib/ollama /usr/local/lib/ollama
 COPY --from=binaries /opt/monero/monero-wallet-rpc /usr/local/bin/monero-wallet-rpc

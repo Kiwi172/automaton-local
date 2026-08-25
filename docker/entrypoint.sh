@@ -100,9 +100,17 @@ donations_off() {
   return 1
 }
 
+earning_off() {
+  case "$(echo "${AUTOMATON_EARNING:-on}" | tr '[:upper:]' '[:lower:]')" in
+    off|0|false|no) return 0 ;;
+  esac
+  return 1
+}
+
 start_wallet_rpc() {
-  if donations_off; then
-    log "donations off — wallet daemon not started"
+  # The wallet is needed for either giving money away or taking it in.
+  if donations_off && earning_off; then
+    log "donations and earning both off — wallet daemon not started"
     return
   fi
 

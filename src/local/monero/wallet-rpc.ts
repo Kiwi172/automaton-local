@@ -37,6 +37,15 @@ export interface IncomingTransfer {
   amountPiconero: bigint;
   height: number;
   timestamp: number;
+  /** Subaddress index the funds landed on, when the wallet reports one. */
+  subaddressIndex?: number;
+  /** Confirmations so far. Zero means it is in the pool but not yet mined. */
+  confirmations?: number;
+}
+
+export interface Subaddress {
+  address: string;
+  index: number;
 }
 
 export class MoneroRpcError extends Error {
@@ -203,25 +212,72 @@ export class MoneroWalletRpc {
   }
 
   /**
-   * Incoming transfers received at or above `minHeight`.
-   * Used to measure income since the last donation, rather than trusting the
-   * agent's own account of what it earned.
+   * Create a fresh subaddress.
+   *
+   * This is what makes an incoming payment attributable. Handing every customer
+   * the same address means a payment tells you an amount and nothing else —
+   * with one address per job, the address *is* the invoice, and no payment id
+   * has to be remembered or supplied correctly by a stranger.
    */
-  async getIncomingTransfers(minHeight: number): Promise<IncomingTransfer[]> {
+  async createSubaddress(label: string): Promise<Subaddress> {
+    const result = await this.call<{ address: string; address_index: number }>(
+      "create_address",
+      { account_index: 0, label },
+    );
+    return { address: result.address, index: result.address_index };
+  }
+
+  /** Confirmed and pending balance for one subaddress. */
+  async getSubaddressBalance(
+    index: number,
+  ): Promise<{ balancePiconero: bigint; unlockedPiconero: bigint }> {
     const result = await this.call<{
-      in?: { txid: string; amount: number | string; height: number; timestamp: number }[];
-    }>("get_transfers", {
+      per_subaddress?: { address_index: number; balance: number | string; unlocked_balance: number | string }[];
+    }>("get_balance", { account_index: 0, address_indices: [index] });
+
+    const entry = (result.per_subaddress ?? []).find((e) => e.address_index === index);
+    return {
+      balancePiconero: entry ? BigInt(entry.balance) : 0n,
+      unlockedPiconero: entry ? BigInt(entry.unlocked_balance) : 0n,
+    };
+  }
+
+  /**
+   * Incoming transfers, optionally only those on a given subaddress.
+   *
+   * Includes pool transactions so a job can be marked paid the moment funds
+   * appear, rather than making a customer wait ~20 minutes for confirmations
+   * before the work starts. Whether that is acceptable depends on the amount —
+   * the caller decides, using the confirmations field.
+   */
+  async getIncomingTransfers(
+    minHeight: number,
+    subaddressIndex?: number,
+  ): Promise<IncomingTransfer[]> {
+    const params: Record<string, unknown> = {
       in: true,
+      pool: true,
       filter_by_height: true,
       min_height: minHeight,
       max_height: 4_294_967_295,
       account_index: 0,
-    });
-    return (result.in ?? []).map((t) => ({
+    };
+    if (subaddressIndex !== undefined) {
+      params.subaddr_indices = [subaddressIndex];
+    }
+
+    const result = await this.call<{
+      in?: any[];
+      pool?: any[];
+    }>("get_transfers", params);
+
+    return [...(result.in ?? []), ...(result.pool ?? [])].map((t) => ({
       txHash: t.txid,
       amountPiconero: BigInt(t.amount),
-      height: t.height,
-      timestamp: t.timestamp,
+      height: t.height ?? 0,
+      timestamp: t.timestamp ?? 0,
+      subaddressIndex: t.subaddr_index?.minor,
+      confirmations: t.confirmations ?? 0,
     }));
   }
 
